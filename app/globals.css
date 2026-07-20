@@ -36,6 +36,10 @@ body {
   min-height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   color: var(--ink);
@@ -359,9 +363,17 @@ textarea {
 .brand-block {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.9rem;
   padding-bottom: 1.25rem;
   border-bottom: 1px solid var(--sidebar-line);
+}
+
+.brand-identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
 }
 
 .brand-mark {
@@ -392,6 +404,18 @@ textarea {
 .brand-block span {
   color: var(--sidebar-ink);
   font-size: 0.92rem;
+}
+
+.mobile-menu-button {
+  display: none;
+  min-height: 42px;
+  border: 1px solid rgba(255, 214, 70, 0.24);
+  border-radius: 999px;
+  padding: 0.65rem 0.9rem;
+  background: rgba(255, 214, 70, 0.14);
+  color: #fff7ca;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .sidebar-nav {
@@ -810,6 +834,7 @@ textarea {
 .table-wrap {
   min-width: 0;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-table {
@@ -1141,6 +1166,21 @@ textarea {
     justify-content: flex-start;
   }
 
+  .table-wrap:not(.cement-calculator-table) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.36);
+  }
+
+  .table-wrap:not(.cement-calculator-table) .data-table {
+    min-width: 720px;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.75rem 0.6rem;
+  }
+
   .cement-calculator-table {
     overflow: visible;
   }
@@ -1213,6 +1253,211 @@ textarea {
   }
 }
 
+@media (max-width: 760px) {
+  .workspace-shell {
+    gap: 0.85rem;
+    padding: 0.8rem;
+  }
+
+  .workspace-sidebar {
+    position: sticky;
+    top: 0.8rem;
+    z-index: 10;
+    gap: 0.8rem;
+    border-radius: 24px;
+    padding: 0.9rem;
+  }
+
+  .brand-block {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .workspace-sidebar-open .brand-block {
+    border-bottom: 1px solid var(--sidebar-line);
+    padding-bottom: 0.85rem;
+  }
+
+  .brand-identity {
+    gap: 0.7rem;
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-nav {
+    display: none;
+    grid-template-columns: 1fr;
+    max-height: min(68vh, 560px);
+    overflow-y: auto;
+    padding-right: 0.15rem;
+  }
+
+  .workspace-sidebar-open .sidebar-nav {
+    display: grid;
+  }
+
+  .sidebar-link {
+    min-height: 48px;
+    border-radius: 16px;
+    padding: 0.55rem 0.65rem;
+  }
+
+  .sidebar-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .sidebar-subnav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0.15rem 0 0.55rem;
+  }
+
+  .sidebar-subnav-link {
+    justify-content: center;
+    min-height: 36px;
+    text-align: center;
+  }
+
+  .workspace-topbar {
+    gap: 0.9rem;
+    padding: 1rem;
+  }
+
+  .workspace-title {
+    gap: 0.45rem;
+  }
+
+  .workspace-title h1,
+  .workspace-main-compact .workspace-title h1 {
+    font-size: clamp(1.75rem, 9vw, 2.45rem);
+    line-height: 1;
+  }
+
+  .topbar-eyebrow {
+    min-height: 28px;
+    padding: 0.32rem 0.7rem;
+    font-size: 0.7rem;
+  }
+
+  .workspace-actions {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .workspace-actions .primary-button,
+  .workspace-actions .ghost-button,
+  .form-actions .primary-button,
+  .form-actions .ghost-button {
+    flex: 1 1 160px;
+  }
+
+  .workspace-panel {
+    padding: 1rem;
+  }
+
+  .stats-grid,
+  .stats-grid-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .stat-card,
+  .stats-grid-summary .stat-card,
+  .stats-grid-compact .stat-card {
+    padding: 0.9rem;
+  }
+
+  .stat-card span {
+    font-size: 0.72rem;
+    line-height: 1.15;
+  }
+
+  .stat-card strong,
+  .stats-grid-summary .stat-card strong,
+  .stats-grid-compact .stat-card strong {
+    margin-top: 0.5rem;
+    font-size: clamp(1.35rem, 7vw, 1.9rem);
+    letter-spacing: -0.04em;
+  }
+
+  .cards-grid,
+  .cards-grid-four,
+  .entity-grid {
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  }
+
+  .action-card {
+    min-height: 118px;
+    padding: 1rem;
+  }
+
+  .panel-headline {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .panel-headline .ghost-button {
+    flex: 1 1 170px;
+  }
+
+  .module-subnav {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .module-subnav-link {
+    flex: 0 0 auto;
+    min-width: 148px;
+    white-space: nowrap;
+  }
+
+  .field input,
+  .field select,
+  .field textarea,
+  .mini-field input,
+  .mini-field select,
+  .table-input {
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  .primary-button,
+  .ghost-button {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .edit-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .delivery-product-row {
+    padding: 0.8rem;
+  }
+
+  .delivery-trip-hint {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .delivery-trip-hint .ghost-button {
+    width: 100%;
+  }
+
+  .inline-action-form {
+    min-width: 150px;
+  }
+}
+
 @media (max-width: 640px) {
   .login-screen,
   .workspace-shell {
@@ -1229,12 +1474,20 @@ textarea {
     border-radius: 20px;
   }
 
+  .login-card {
+    padding: 1.45rem;
+  }
+
   .brand-block {
     padding-bottom: 0.9rem;
   }
 
   .sidebar-nav {
     grid-template-columns: 1fr;
+  }
+
+  .workspace-sidebar:not(.workspace-sidebar-open) .brand-block {
+    padding-bottom: 0;
   }
 
   .production-stats-grid {
@@ -1252,5 +1505,13 @@ textarea {
   .cement-calculator-table .data-table td {
     grid-template-columns: 1fr;
     gap: 0.35rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .stats-grid,
+  .stats-grid-summary,
+  .production-stats-grid {
+    grid-template-columns: 1fr;
   }
 }

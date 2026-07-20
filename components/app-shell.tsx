@@ -36,6 +36,7 @@ export function AppShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentPath = pathname ?? "";
+  const searchKey = searchParams.toString();
   const adminSection = normalizeAdminSection(searchParams.get("section"));
   const domiciliosSection = normalizeDomiciliosSection(searchParams.get("section"));
   const isOnDomicilios = currentPath.startsWith("/domicilios");
@@ -48,6 +49,7 @@ export function AppShell({
   const [isDomiciliosSubnavOpen, setIsDomiciliosSubnavOpen] = useState(true);
   const [isBlocksSubnavOpen, setIsBlocksSubnavOpen] = useState(true);
   const [isAdminSubnavOpen, setIsAdminSubnavOpen] = useState(true);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
   useEffect(() => {
     if (!isOnDomicilios) {
@@ -60,6 +62,10 @@ export function AppShell({
       setIsAdminSubnavOpen(true);
     }
   }, [isOnAdmin, isOnBlocksGroup, isOnDomicilios]);
+
+  useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [currentPath, searchKey]);
 
   function handleDomiciliosClick(event: MouseEvent<HTMLAnchorElement>) {
     if (!isOnDomicilios) return;
@@ -81,16 +87,27 @@ export function AppShell({
 
   return (
     <div className="workspace-shell">
-      <aside className="workspace-sidebar">
+      <aside className={`workspace-sidebar ${isMobileNavOpen ? "workspace-sidebar-open" : ""}`}>
         <div className="brand-block">
-          <BrandLogo compact />
-          <div>
-            <strong>Bloquera</strong>
-            <span>San Carlos</span>
+          <div className="brand-identity">
+            <BrandLogo compact />
+            <div>
+              <strong>Bloquera</strong>
+              <span>San Carlos</span>
+            </div>
           </div>
+          <button
+            aria-controls="workspace-navigation"
+            aria-expanded={isMobileNavOpen}
+            className="mobile-menu-button"
+            onClick={() => setIsMobileNavOpen((previous) => !previous)}
+            type="button"
+          >
+            {isMobileNavOpen ? "Cerrar" : "Menu"}
+          </button>
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" id="workspace-navigation">
           {navItems.map((item) => {
             const isActive =
               item.href === "/produccion-bloques"

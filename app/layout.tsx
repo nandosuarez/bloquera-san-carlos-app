@@ -1,9 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Bloquera San Carlos",
   description: "Sistema interno para la ferreteria Bloquera San Carlos."
+};
+
+export const viewport: Viewport = {
+  initialScale: 1,
+  themeColor: "#b1111b",
+  width: "device-width"
 };
 
 type RootLayoutProps = {
