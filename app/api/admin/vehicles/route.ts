@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordAuditLog } from "@/lib/audit";
 import { requireAdminRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 import { createVehicle, updateVehicle, VehicleError } from "@/lib/vehicles";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/administracion?section=vehicles&${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/administracion?section=vehicles&${query}`);
 }
 
 export async function POST(request: NextRequest) {

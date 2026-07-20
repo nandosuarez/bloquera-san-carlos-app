@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDeliveryProductsReport } from "@/lib/delivery-services";
+import { redirectTo } from "@/lib/redirects";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 export async function GET(request: NextRequest) {
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
   );
 
   if (!session) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+    return redirectTo(request, "/login");
   }
 
   const fromDate = request.nextUrl.searchParams.get("fromDate");

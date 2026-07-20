@@ -4,12 +4,10 @@ import {
   TransportProviderError
 } from "@/lib/transport-providers";
 import { requireAdminRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/administracion?section=transport-providers&${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/administracion?section=transport-providers&${query}`);
 }
 
 export async function POST(request: NextRequest) {

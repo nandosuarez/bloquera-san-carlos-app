@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createProductLine, OperationsError } from "@/lib/operations";
 import { requireAdminRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/administracion?section=product-lines&${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/administracion?section=product-lines&${query}`);
 }
 
 export async function POST(request: NextRequest) {

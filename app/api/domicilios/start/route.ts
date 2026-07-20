@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { DeliveryServiceError, startDeliveryService } from "@/lib/delivery-services";
 import { recordAuditLog } from "@/lib/audit";
 import { requireSalesRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToModule(request: NextRequest, section: string, query: string) {
-  return NextResponse.redirect(
-    new URL(`/domicilios?section=${section}&${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/domicilios?section=${section}&${query}`);
 }
 
 export async function POST(request: NextRequest) {

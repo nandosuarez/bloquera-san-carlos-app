@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { redirectTo } from "@/lib/redirects";
 import {
   SESSION_COOKIE_NAME,
   verifySessionToken,
@@ -56,11 +57,11 @@ export function requireRequestRole(
   );
 
   if (!session) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+    return redirectTo(request, "/login");
   }
 
   if (!canAccessRole(session.role, allowedRoles)) {
-    return NextResponse.redirect(new URL("/inicio?error=forbidden", request.url), 303);
+    return redirectTo(request, "/inicio?error=forbidden");
   }
 
   return session;

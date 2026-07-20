@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { OperationsError, recordBlockProduction } from "@/lib/operations";
 import { recordAuditLog } from "@/lib/audit";
 import { requireOperationsRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/produccion-bloques?${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/produccion-bloques?${query}`);
 }
 
 export async function POST(request: NextRequest) {

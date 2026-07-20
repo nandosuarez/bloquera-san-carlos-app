@@ -5,9 +5,10 @@ import {
 } from "@/lib/delivery-services";
 import { recordAuditLog } from "@/lib/audit";
 import { requireSalesRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToModule(request: NextRequest, query: string) {
-  return NextResponse.redirect(new URL(`/domicilios?${query}`, request.url), 303);
+  return redirectTo(request, `/domicilios?${query}`);
 }
 
 export async function POST(request: NextRequest) {

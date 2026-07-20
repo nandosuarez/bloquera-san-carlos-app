@@ -7,9 +7,10 @@ import {
 } from "@/lib/transport-costs";
 import { recordAuditLog } from "@/lib/audit";
 import { requireOperationsRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToModule(request: NextRequest, query: string) {
-  return NextResponse.redirect(new URL(`/costos-transporte?${query}`, request.url), 303);
+  return redirectTo(request, `/costos-transporte?${query}`);
 }
 
 export async function POST(request: NextRequest) {

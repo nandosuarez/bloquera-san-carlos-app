@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { verifyPassword } from "@/lib/passwords";
+import { redirectTo } from "@/lib/redirects";
 import {
   SESSION_COOKIE_NAME,
   createSessionToken,
@@ -8,7 +8,7 @@ import {
 import { findUserByUsername } from "@/lib/users";
 
 function redirectWithQuery(request: Request, query: string) {
-  return NextResponse.redirect(new URL(`/login?${query}`, request.url), 303);
+  return redirectTo(request, `/login?${query}`);
 }
 
 export async function POST(request: Request) {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       return redirectWithQuery(request, "error=invalid_credentials");
     }
 
-    const response = NextResponse.redirect(new URL("/inicio", request.url), 303);
+    const response = redirectTo(request, "/inicio");
 
     response.cookies.set(
       SESSION_COOKIE_NAME,

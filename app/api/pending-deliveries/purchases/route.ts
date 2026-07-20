@@ -5,13 +5,11 @@ import {
   registerPendingPurchase,
   validateMovementDate
 } from "@/lib/pending-deliveries";
+import { redirectTo } from "@/lib/redirects";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 function redirectToModule(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/pendientes-entrega?${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/pendientes-entrega?${query}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -20,7 +18,7 @@ export async function POST(request: NextRequest) {
   );
 
   if (!session) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+    return redirectTo(request, "/login");
   }
 
   const formData = await request.formData();

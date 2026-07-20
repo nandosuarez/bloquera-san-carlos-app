@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OperationsError, saveBlockFormula } from "@/lib/operations";
 import { requireAdminRequest } from "@/lib/permissions";
+import { redirectTo } from "@/lib/redirects";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(
-    new URL(`/administracion?section=formulas&${query}`, request.url),
-    303
-  );
+  return redirectTo(request, `/administracion?section=formulas&${query}`);
 }
 
 export async function POST(request: NextRequest) {

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { OperationsError, recordInventoryAdjustment } from "@/lib/operations";
+import { redirectTo } from "@/lib/redirects";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 function redirectToTarget(request: NextRequest, target: string, query: string) {
-  return NextResponse.redirect(new URL(`${target}?${query}`, request.url), 303);
+  return redirectTo(request, `${target}?${query}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
   );
 
   if (!session) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+    return redirectTo(request, "/login");
   }
 
   const formData = await request.formData();

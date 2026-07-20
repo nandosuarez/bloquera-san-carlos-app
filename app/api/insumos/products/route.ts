@@ -4,10 +4,11 @@ import {
   setProductAsRawMaterial,
   type RawMaterialType
 } from "@/lib/operations";
+import { redirectTo } from "@/lib/redirects";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 function redirectToPage(request: NextRequest, query: string) {
-  return NextResponse.redirect(new URL(`/insumos?${query}`, request.url), 303);
+  return redirectTo(request, `/insumos?${query}`);
 }
 
 export async function POST(request: NextRequest) {
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   );
 
   if (!session) {
-    return NextResponse.redirect(new URL("/login", request.url), 303);
+    return redirectTo(request, "/login");
   }
 
   const formData = await request.formData();
