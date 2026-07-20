@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: bloquera-san-carlos-app
+    runtime: node
+    plan: starter
+    region: virginia
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run db:setup:render
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TZ
+        value: America/Bogota
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bloquera-san-carlos-db
+          property: connectionString
+      - key: POSTGRES_SSL
+        value: "false"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SESSION_SECURE
+        value: "true"
+      - key: ADMIN_NAME
+        value: Administrador Bloquera
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_EMAIL
+        value: admin@bloquerasancarlos.com
+      - key: ADMIN_PASSWORD
+        sync: false
+
+databases:
+  - name: bloquera-san-carlos-db
+    databaseName: bloquera_san_carlos
+    user: bloquera_admin
+    postgresMajorVersion: "17"
+    plan: basic-256mb
+    region: virginia
+    diskSizeGB: 1
+    ipAllowList: []

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:setup": "node --env-file=.env scripts/setup-db.mjs"
+    "start:render": "next start -p $PORT",
+    "db:setup": "node --env-file=.env scripts/setup-db.mjs",
+    "db:setup:render": "node scripts/setup-db.mjs"
   },
   "dependencies": {
     "next": "^14.2.0",
