@@ -1,0 +1,9 @@
+node_modules
+.next
+.next-bloquera
+.next-bloquera-*
+.env
+npm-debug.log*
+*.log
+*.tsbuildinfo
+.edge-symbol-check
