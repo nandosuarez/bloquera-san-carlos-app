@@ -13,6 +13,7 @@ import {
   getCuentiSaleDetail,
   getCuentiSales,
   type CuentiSaleDetail,
+  type CuentiSaleSource,
   type CuentiSaleSummary
 } from "@/lib/cuenti";
 import { requireSalesPage } from "@/lib/permissions";
@@ -51,6 +52,7 @@ type DomiciliosPageProps = {
     fromDate?: string;
     saleFromDate?: string;
     saleRef?: string;
+    saleSource?: string;
     saleToDate?: string;
     section?: string;
     sentProductId?: string;
@@ -104,7 +106,10 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
       ? loadCuentiSalesView({ dateFrom: salesDateFrom, dateTo: salesDateTo })
       : Promise.resolve<CuentiSalesView | null>(null),
     searchParams?.saleRef
-      ? loadCuentiSaleSelection(searchParams.saleRef)
+      ? loadCuentiSaleSelection(
+          searchParams.saleRef,
+          normalizeSaleSource(searchParams.saleSource)
+        )
       : Promise.resolve<CuentiSaleSelectionView>({ error: null, sale: null })
   ]);
   const salePrefill = selectedSaleView.sale
@@ -265,6 +270,7 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
               <thead>
                 <tr>
                   <th>Fecha</th>
+                  <th>Tipo</th>
                   <th>Documento</th>
                   <th>Cliente</th>
                   <th>Total</th>
@@ -275,16 +281,21 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
               <tbody>
                 {!cuentiSalesView || cuentiSalesView.sales.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       {cuentiSalesView?.error
                         ? "No fue posible consultar ventas."
-                        : "Sin ventas de Cuenti para el filtro actual."}
+                        : cuentiSalesView && cuentiSalesView.rawItemsSeen > 0
+                          ? `Cuenti devolvio ${cuentiSalesView.rawItemsSeen} registros, pero no fue posible interpretar sus datos.`
+                          : "Sin facturas ni pedidos de Cuenti para el filtro actual."}
                     </td>
                   </tr>
                 ) : (
                   cuentiSalesView.sales.map((sale) => (
-                    <tr key={`${sale.branchId ?? "branch"}-${sale.cuentiSaleId}`}>
+                    <tr
+                      key={`${sale.branchId ?? "branch"}-${sale.source}-${sale.cuentiSaleId}`}
+                    >
                       <td>{sale.saleDate ? formatDate(sale.saleDate) : "-"}</td>
+                      <td>{formatSaleSource(sale.source)}</td>
                       <td>
                         {sale.documentNumber ?? sale.cuentiSaleId}
                         <span className="table-meta">ID: {sale.cuentiSaleId}</span>
@@ -692,9 +703,12 @@ async function loadCuentiSalesView(input: {
   }
 }
 
-async function loadCuentiSaleSelection(ref: string): Promise<CuentiSaleSelectionView> {
+async function loadCuentiSaleSelection(
+  ref: string,
+  source: CuentiSaleSource
+): Promise<CuentiSaleSelectionView> {
   try {
-    const sale = await getCuentiSaleDetail(ref);
+    const sale = await getCuentiSaleDetail(ref, source);
 
     return {
       error: sale ? null : "No encontre el detalle de esta venta en Cuenti.",
@@ -740,7 +754,7 @@ function buildSalePrefill(
   }
 
   const saleLabel = sale.documentNumber
-    ? `Factura ${sale.documentNumber}`
+    ? `${formatSaleSource(sale.source)} ${sale.documentNumber}`
     : `Venta Cuenti ${sale.cuentiSaleId}`;
   const notes = [
     saleLabel,
@@ -831,6 +845,14 @@ function normalizeDateParam(value?: string) {
   return normalized && /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
 }
 
+function normalizeSaleSource(value?: string): CuentiSaleSource {
+  return value === "order" ? "order" : "invoice";
+}
+
+function formatSaleSource(source: CuentiSaleSource) {
+  return source === "order" ? "Pedido" : "Factura";
+}
+
 function normalizeComparableId(value?: string | null) {
   return value
     ?.trim()
@@ -882,6 +904,7 @@ function buildLoadSaleHref(sale: CuentiSaleSummary) {
   const params = new URLSearchParams();
   params.set("section", "programar");
   params.set("saleRef", sale.cuentiSaleId);
+  params.set("saleSource", sale.source);
 
   return `/domicilios?${params.toString()}`;
 }

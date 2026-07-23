@@ -90,6 +90,8 @@ export type CuentiProductStockResult = {
   stockQty: number | null;
 };
 
+export type CuentiSaleSource = "invoice" | "order";
+
 export type CuentiSaleSummary = {
   branchId: string | null;
   cuentiCustomerId: string | null;
@@ -100,6 +102,7 @@ export type CuentiSaleSummary = {
   customerPhone: string | null;
   documentNumber: string | null;
   saleDate: string | null;
+  source: CuentiSaleSource;
   status: string | null;
   totalAmount: number | null;
 };
@@ -396,7 +399,7 @@ export async function getCuentiSales(input?: {
   for (const branchId of branchCandidates) {
     try {
       const requestedPage = normalizePositiveInteger(input?.page, 1);
-      const firstPageResult = await getCuentiSalesForBranch(
+      const branchResult = await getCuentiSalesForBranch(
         credentials,
         branchId,
         {
@@ -406,15 +409,6 @@ export async function getCuentiSales(input?: {
           pageSize: normalizePositiveInteger(input?.pageSize, 30)
         }
       );
-      const branchResult =
-        firstPageResult.rawItemsSeen > 0 || requestedPage === 0
-          ? firstPageResult
-          : await getCuentiSalesForBranch(credentials, branchId, {
-              dateFrom: normalizeDateFilter(input?.dateFrom),
-              dateTo: normalizeDateFilter(input?.dateTo),
-              page: 0,
-              pageSize: normalizePositiveInteger(input?.pageSize, 30)
-            });
 
       if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
         bestResult = branchResult;
@@ -450,7 +444,8 @@ export async function getCuentiSales(input?: {
 }
 
 export async function getCuentiSaleDetail(
-  ref: string
+  ref: string,
+  source: CuentiSaleSource = "invoice"
 ): Promise<CuentiSaleDetail | null> {
   const normalizedRef = normalizeOptionalText(ref);
   const status = getCuentiConfigStatus();
@@ -482,7 +477,8 @@ export async function getCuentiSaleDetail(
       const branchResult = await getCuentiSaleDetailForBranch(
         credentials,
         branchId,
-        normalizedRef
+        normalizedRef,
+        source
       );
 
       if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
@@ -660,37 +656,72 @@ async function getCuentiSalesForBranch(
   if (input.dateFrom) searchParams.dateFrom = input.dateFrom;
   if (input.dateTo) searchParams.dateTo = input.dateTo;
 
-  const payload = await requestCuentiData(credentials, "invoices", searchParams);
-  const items = extractResponseItems(payload);
-  const sales = items
-    .map((item) => mapCuentiSaleSummary(item, branchId))
-    .filter((item): item is CuentiSaleSummary => Boolean(item));
+  const sources: Array<{
+    endpoint: string;
+    source: CuentiSaleSource;
+  }> = [
+    { endpoint: "invoices", source: "invoice" },
+    { endpoint: "orders", source: "order" }
+  ];
+  const sales: CuentiSaleSummary[] = [];
+  let rawItemsSeen = 0;
+  let successfulSources = 0;
+  let lastError: unknown = null;
 
-  if (items.length > 0 && sales.length === 0) {
-    console.warn("Cuenti invoices response had raw items but no usable sales", {
-      branchId,
-      firstItemKeys: getInspectableKeys(items[0]),
-      rawItems: items.length
-    });
+  for (const { endpoint, source } of sources) {
+    try {
+      const payload = await requestCuentiData(
+        credentials,
+        endpoint,
+        searchParams
+      );
+      const items = extractResponseItems(payload);
+      const mappedSales = items
+        .map((item) => mapCuentiSaleSummary(item, branchId, source))
+        .filter((item): item is CuentiSaleSummary => Boolean(item));
+
+      successfulSources += 1;
+      rawItemsSeen += items.length;
+      sales.push(...mappedSales);
+
+      if (items.length > 0 && mappedSales.length === 0) {
+        console.warn(`Cuenti ${endpoint} response had no usable sales`, {
+          branchId,
+          firstItemKeys: getInspectableKeys(items[0]),
+          rawItems: items.length
+        });
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`Could not load Cuenti ${endpoint}`, {
+        branchId,
+        message: error instanceof Error ? error.message : "Unknown Cuenti error"
+      });
+    }
+  }
+
+  if (successfulSources === 0 && lastError) {
+    throw lastError;
   }
 
   return {
     branchId,
-    rawItemsSeen: items.length,
-    sales
+    rawItemsSeen,
+    sales: dedupeAndSortCuentiSales(sales)
   };
 }
 
 async function getCuentiSaleDetailForBranch(
   credentials: CuentiCredentials,
   branchId: string,
-  ref: string
+  ref: string,
+  source: CuentiSaleSource
 ): Promise<CuentiSaleDetailBranchResult> {
-  const payload = await requestCuentiData(credentials, "invoice", {
+  const payload = await requestCuentiData(credentials, source, {
     branchId,
     ref
   });
-  const sale = mapCuentiSaleDetail(payload, branchId, ref);
+  const sale = mapCuentiSaleDetail(payload, branchId, ref, source);
 
   return {
     branchId,
@@ -905,7 +936,8 @@ function mapReferenceItem(
 
 function mapCuentiSaleSummary(
   value: unknown,
-  branchId: string | null
+  branchId: string | null,
+  source: CuentiSaleSource
 ): CuentiSaleSummary | null {
   if (!isRecord(value)) {
     return null;
@@ -921,6 +953,10 @@ function mapCuentiSaleSummary(
     "idFactura",
     "invoiceId",
     "invoice_id",
+    "id_pedido",
+    "idPedido",
+    "orderId",
+    "order_id",
     "id_venta",
     "idVenta",
     "saleId",
@@ -930,6 +966,11 @@ function mapCuentiSaleSummary(
     "numero_factura",
     "numeroFactura",
     "factura",
+    "numero_pedido",
+    "numeroPedido",
+    "pedido",
+    "orderNumber",
+    "order_number",
     "consecutivo",
     "numero_consecutivo",
     "numeroConsecutivo",
@@ -955,12 +996,15 @@ function mapCuentiSaleSummary(
       "fecha",
       "fecha_factura",
       "fechaFactura",
+      "fecha_pedido",
+      "fechaPedido",
       "fecha_registro",
       "fechaRegistro",
       "createdAt",
       "created_at",
       "date",
       "invoiceDate",
+      "orderDate",
       "saleDate"
     ])
   );
@@ -1020,11 +1064,14 @@ function mapCuentiSaleSummary(
     ]),
     documentNumber,
     saleDate,
+    source,
     status: findFirstTextValue(record, [
       "estado",
       "status",
       "state",
       "estado_factura",
+      "estado_pedido",
+      "orderStatus",
       "invoiceStatus"
     ]),
     totalAmount
@@ -1034,13 +1081,14 @@ function mapCuentiSaleSummary(
 function mapCuentiSaleDetail(
   payload: CuentiRawResponse,
   branchId: string,
-  fallbackRef: string
+  fallbackRef: string,
+  source: CuentiSaleSource
 ): CuentiSaleDetail | null {
   const detailSource = getCaseInsensitiveValue(payload, "data") ?? payload;
   const headerSource = resolveCuentiSaleHeader(detailSource) ?? payload;
   const summary =
-    mapCuentiSaleSummary(headerSource, branchId) ??
-    mapCuentiSaleSummary(payload, branchId) ?? {
+    mapCuentiSaleSummary(headerSource, branchId, source) ??
+    mapCuentiSaleSummary(payload, branchId, source) ?? {
       branchId,
       cuentiCustomerId: null,
       cuentiSaleId: fallbackRef,
@@ -1050,6 +1098,7 @@ function mapCuentiSaleDetail(
       customerPhone: null,
       documentNumber: null,
       saleDate: null,
+      source,
       status: null,
       totalAmount: null
     };
@@ -1062,8 +1111,35 @@ function mapCuentiSaleDetail(
     ...summary,
     branchId,
     cuentiSaleId: summary.cuentiSaleId || fallbackRef,
+    source,
     items
   };
+}
+
+function dedupeAndSortCuentiSales(sales: CuentiSaleSummary[]) {
+  const uniqueSales = new Map<string, CuentiSaleSummary>();
+
+  for (const sale of sales) {
+    const key = `${sale.source}:${sale.cuentiSaleId}`;
+
+    if (!uniqueSales.has(key)) {
+      uniqueSales.set(key, sale);
+    }
+  }
+
+  return [...uniqueSales.values()].sort((left, right) => {
+    const dateComparison = (right.saleDate ?? "").localeCompare(
+      left.saleDate ?? ""
+    );
+
+    return dateComparison !== 0
+      ? dateComparison
+      : (right.documentNumber ?? right.cuentiSaleId).localeCompare(
+          left.documentNumber ?? left.cuentiSaleId,
+          "es-CO",
+          { numeric: true }
+        );
+  });
 }
 
 function resolveCuentiSaleHeader(value: unknown): unknown | null {
@@ -1076,6 +1152,8 @@ function resolveCuentiSaleHeader(value: unknown): unknown | null {
     "header",
     "factura",
     "invoice",
+    "pedido",
+    "order",
     "venta",
     "sale",
     "documento",
