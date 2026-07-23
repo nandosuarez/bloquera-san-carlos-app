@@ -4,7 +4,9 @@ import { useEffect, useId, useState } from "react";
 
 type CustomerOption = {
   address?: string | null;
+  cuentiCustomerId?: string | null;
   id: string;
+  identification?: string | null;
   name: string;
   phone?: string | null;
 };
@@ -156,7 +158,7 @@ function filterCustomers(customers: CustomerOption[], query: string) {
   return customers
     .filter((customer) => {
       const searchableText = normalizeText(
-        `${customer.name} ${customer.phone ?? ""} ${customer.address ?? ""}`
+        `${customer.name} ${customer.phone ?? ""} ${customer.address ?? ""} ${customer.identification ?? ""} ${customer.cuentiCustomerId ?? ""}`
       );
       return searchableText.includes(normalizedQuery);
     })

@@ -16,10 +16,24 @@ type DeliveryProductRow = {
   tripCount: string;
 };
 
+export type DeliveryServiceInitialValue = {
+  customerAddress?: string | null;
+  customerId?: string | null;
+  customerPhone?: string | null;
+  notes?: string | null;
+  productRows?: Array<{
+    productId: string;
+    quantity: number | string;
+    tripCount?: number | string | null;
+  }>;
+  serviceOn?: string | null;
+};
+
 type DeliveryServiceFormProps = {
   collaborators: DeliveryCollaboratorOption[];
   customers: DeliveryCustomerOption[];
   defaultDate: string;
+  initialValue?: DeliveryServiceInitialValue | null;
   products: DeliveryProductOption[];
   vehicles: DeliveryVehicleOption[];
 };
@@ -28,16 +42,20 @@ export function DeliveryServiceForm({
   collaborators,
   customers,
   defaultDate,
+  initialValue,
   products,
   vehicles
 }: DeliveryServiceFormProps) {
-  const [customerId, setCustomerId] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerAddress, setCustomerAddress] = useState("");
+  const [customerId, setCustomerId] = useState(initialValue?.customerId ?? "");
+  const [customerPhone, setCustomerPhone] = useState(initialValue?.customerPhone ?? "");
+  const [customerAddress, setCustomerAddress] = useState(initialValue?.customerAddress ?? "");
   const [vehicleId, setVehicleId] = useState("");
-  const [productRows, setProductRows] = useState<DeliveryProductRow[]>([
-    { id: 1, productId: "", quantity: "", tripCount: "1" }
-  ]);
+  const [preserveInitialContact, setPreserveInitialContact] = useState(
+    Boolean(initialValue?.customerId && (initialValue.customerPhone || initialValue.customerAddress))
+  );
+  const [productRows, setProductRows] = useState<DeliveryProductRow[]>(() =>
+    buildInitialProductRows(initialValue?.productRows)
+  );
 
   const hasBaseData =
     collaborators.length > 0 &&
@@ -53,9 +71,14 @@ export function DeliveryServiceForm({
       return;
     }
 
+    if (preserveInitialContact) {
+      setPreserveInitialContact(false);
+      return;
+    }
+
     setCustomerPhone(selectedCustomer.phone ?? "");
     setCustomerAddress(selectedCustomer.address ?? "");
-  }, [customerId, customers]);
+  }, [customerId, customers, preserveInitialContact]);
 
   function addProductRow() {
     setProductRows((currentRows) => {
@@ -86,7 +109,12 @@ export function DeliveryServiceForm({
       <div className="split-fields">
         <label className="field">
           <span>Fecha</span>
-          <input defaultValue={defaultDate} name="serviceOn" required type="date" />
+          <input
+            defaultValue={initialValue?.serviceOn ?? defaultDate}
+            name="serviceOn"
+            required
+            type="date"
+          />
         </label>
 
         <label className="field">
@@ -227,7 +255,7 @@ export function DeliveryServiceForm({
 
       <label className="field">
         <span>Nota</span>
-        <textarea name="notes" rows={2} />
+        <textarea defaultValue={initialValue?.notes ?? ""} name="notes" rows={2} />
       </label>
 
       {!hasBaseData ? (
@@ -241,6 +269,35 @@ export function DeliveryServiceForm({
       </button>
     </form>
   );
+}
+
+function buildInitialProductRows(
+  productRows?: DeliveryServiceInitialValue["productRows"]
+): DeliveryProductRow[] {
+  const normalizedRows = (productRows ?? [])
+    .map((row, index) => ({
+      id: index + 1,
+      productId: row.productId,
+      quantity: formatInputNumber(row.quantity),
+      tripCount: formatInputNumber(row.tripCount ?? 1) || "1"
+    }))
+    .filter((row) => row.productId && row.quantity);
+
+  return normalizedRows.length > 0
+    ? normalizedRows
+    : [{ id: 1, productId: "", quantity: "", tripCount: "1" }];
+}
+
+function formatInputNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+
+  return value.trim();
 }
 
 function TripSuggestion({

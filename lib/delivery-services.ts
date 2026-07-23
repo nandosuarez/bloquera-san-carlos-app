@@ -11,7 +11,9 @@ type CollaboratorOptionRow = {
 
 type CustomerOptionRow = {
   address: string | null;
+  cuenti_customer_id: string | null;
   id: string;
+  identification: string | null;
   name: string;
   phone: string | null;
 };
@@ -24,8 +26,10 @@ type VehicleOptionRow = {
 };
 
 type ProductOptionRow = {
+  cuenti_product_id: string | null;
   id: string;
   name: string;
+  sku: string | null;
   unit_name: string;
   weight_kg: string;
 };
@@ -113,8 +117,10 @@ type TransportTotalRow = {
 type ServiceStatusFilter = "PENDING" | "PROGRAMMED" | "STARTED" | "COMPLETED" | "CANCELED" | "ALL";
 
 export type DeliveryProductOption = {
+  cuentiProductId: string | null;
   id: string;
   name: string;
+  sku: string | null;
   unitName: string;
   weightKg: number;
 };
@@ -126,7 +132,9 @@ export type DeliveryCollaboratorOption = {
 
 export type DeliveryCustomerOption = {
   address: string | null;
+  cuentiCustomerId: string | null;
   id: string;
+  identification: string | null;
   name: string;
   phone: string | null;
 };
@@ -264,7 +272,7 @@ export async function getDeliveryServiceOverview(input?: {
       ),
       getDb().query<CustomerOptionRow>(
         `
-          SELECT id, name, phone, address
+          SELECT id, name, cuenti_customer_id, identification, phone, address
           FROM customer
           WHERE is_active = TRUE
           ORDER BY name
@@ -280,7 +288,7 @@ export async function getDeliveryServiceOverview(input?: {
       ),
       getDb().query<ProductOptionRow>(
         `
-          SELECT id, name, unit_name, weight_kg
+          SELECT id, name, sku, cuenti_product_id, unit_name, weight_kg
           FROM product
           WHERE is_active = TRUE
           ORDER BY name
@@ -358,7 +366,9 @@ export async function getDeliveryServiceOverview(input?: {
     })),
     customers: customersResult.rows.map((row) => ({
       address: row.address,
+      cuentiCustomerId: row.cuenti_customer_id,
       id: row.id,
+      identification: row.identification,
       name: row.name,
       phone: row.phone
     })),
@@ -377,8 +387,10 @@ export async function getDeliveryServiceOverview(input?: {
       toDate
     },
     products: productsResult.rows.map((row) => ({
+      cuentiProductId: row.cuenti_product_id,
       id: row.id,
       name: row.name,
+      sku: row.sku,
       unitName: row.unit_name,
       weightKg: Number(row.weight_kg)
     })),
@@ -433,7 +445,7 @@ export async function getDeliveryProductsReport(input?: {
   const [productsResult, deliveredProductsResult] = await Promise.all([
     getDb().query<ProductOptionRow>(
       `
-        SELECT id, name, unit_name, weight_kg
+        SELECT id, name, sku, cuenti_product_id, unit_name, weight_kg
         FROM product
         WHERE is_active = TRUE
         ORDER BY name
@@ -458,8 +470,10 @@ export async function getDeliveryProductsReport(input?: {
     },
     items,
     products: productsResult.rows.map((row) => ({
+      cuentiProductId: row.cuenti_product_id,
       id: row.id,
       name: row.name,
+      sku: row.sku,
       unitName: row.unit_name,
       weightKg: Number(row.weight_kg)
     })),

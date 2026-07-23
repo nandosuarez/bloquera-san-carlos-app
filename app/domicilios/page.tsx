@@ -1,6 +1,20 @@
 import { AppShell } from "@/components/app-shell";
-import { DeliveryServiceForm } from "@/components/delivery-service-form";
-import { getDeliveryServiceOverview, type DeliveryServiceRecord } from "@/lib/delivery-services";
+import {
+  DeliveryServiceForm,
+  type DeliveryServiceInitialValue
+} from "@/components/delivery-service-form";
+import {
+  getDeliveryServiceOverview,
+  type DeliveryServiceOverview,
+  type DeliveryServiceRecord
+} from "@/lib/delivery-services";
+import {
+  CuentiIntegrationError,
+  getCuentiSaleDetail,
+  getCuentiSales,
+  type CuentiSaleDetail,
+  type CuentiSaleSummary
+} from "@/lib/cuenti";
 import { requireSalesPage } from "@/lib/permissions";
 import Link from "next/link";
 
@@ -35,6 +49,9 @@ type DomiciliosPageProps = {
   searchParams?: {
     error?: string;
     fromDate?: string;
+    saleFromDate?: string;
+    saleRef?: string;
+    saleToDate?: string;
     section?: string;
     sentProductId?: string;
     status?: string;
@@ -43,20 +60,56 @@ type DomiciliosPageProps = {
   };
 };
 
-type DomiciliosSection = "programar" | "servicios" | "productos";
+type DomiciliosSection = "programar" | "ventas" | "servicios" | "productos";
+
+type CuentiSalesView = {
+  branchCandidates: string[];
+  branchId: string | null;
+  dateFrom: string;
+  dateTo: string;
+  error: string | null;
+  rawItemsSeen: number;
+  sales: CuentiSaleSummary[];
+};
+
+type CuentiSaleSelectionView = {
+  error: string | null;
+  sale: CuentiSaleDetail | null;
+};
+
+type SalePrefillView = {
+  initialValue: DeliveryServiceInitialValue;
+  matchedProducts: number;
+  saleLabel: string;
+  unmatchedCustomer: boolean;
+  unmatchedProducts: string[];
+};
 
 export default async function DomiciliosPage({ searchParams }: DomiciliosPageProps) {
   requireSalesPage();
   const section = normalizeSection(searchParams?.section);
-  const overview = await getDeliveryServiceOverview({
-    fromDate: searchParams?.fromDate,
-    sentProductId: searchParams?.sentProductId,
-    status: searchParams?.status,
-    toDate: searchParams?.toDate
-  });
   const today = new Date().toLocaleDateString("sv-SE", {
     timeZone: "America/Bogota"
   });
+  const salesDateFrom = normalizeDateParam(searchParams?.saleFromDate) ?? today;
+  const salesDateTo = normalizeDateParam(searchParams?.saleToDate) ?? today;
+  const [overview, cuentiSalesView, selectedSaleView] = await Promise.all([
+    getDeliveryServiceOverview({
+      fromDate: searchParams?.fromDate,
+      sentProductId: searchParams?.sentProductId,
+      status: searchParams?.status,
+      toDate: searchParams?.toDate
+    }),
+    section === "ventas"
+      ? loadCuentiSalesView({ dateFrom: salesDateFrom, dateTo: salesDateTo })
+      : Promise.resolve<CuentiSalesView | null>(null),
+    searchParams?.saleRef
+      ? loadCuentiSaleSelection(searchParams.saleRef)
+      : Promise.resolve<CuentiSaleSelectionView>({ error: null, sale: null })
+  ]);
+  const salePrefill = selectedSaleView.sale
+    ? buildSalePrefill(selectedSaleView.sale, overview, today)
+    : null;
   const now = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     hour12: false,
@@ -115,6 +168,12 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
             Programar
           </Link>
           <Link
+            className={`module-subnav-link ${section === "ventas" ? "module-subnav-link-active" : ""}`}
+            href={buildCuentiSalesHref({ dateFrom: salesDateFrom, dateTo: salesDateTo })}
+          >
+            Ventas Cuenti
+          </Link>
+          <Link
             className={`module-subnav-link ${section === "servicios" ? "module-subnav-link-active" : ""}`}
             href={buildSectionHref("servicios", overview.filters)}
           >
@@ -135,13 +194,122 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
             <strong>Programar domicilio</strong>
           </div>
 
+          {selectedSaleView.error ? (
+            <div className="message message-error">{selectedSaleView.error}</div>
+          ) : null}
+
+          {salePrefill ? (
+            <div className="message message-success">
+              {salePrefill.saleLabel} cargada. Productos encontrados:{" "}
+              {salePrefill.matchedProducts}.
+            </div>
+          ) : null}
+
+          {salePrefill?.unmatchedCustomer ? (
+            <div className="message message-error">
+              No encontre el cliente de esta venta en la app. Sincroniza clientes o
+              seleccionalo manualmente antes de guardar.
+            </div>
+          ) : null}
+
+          {salePrefill && salePrefill.unmatchedProducts.length > 0 ? (
+            <div className="message message-error">
+              Productos sin conectar: {salePrefill.unmatchedProducts.join(", ")}.
+              Sincroniza productos o agregalos manualmente.
+            </div>
+          ) : null}
+
           <DeliveryServiceForm
             collaborators={overview.collaborators}
             customers={overview.customers}
             defaultDate={today}
+            initialValue={salePrefill?.initialValue ?? null}
             products={overview.products}
             vehicles={overview.vehicles}
           />
+        </section>
+      ) : null}
+
+      {section === "ventas" ? (
+        <section className="workspace-panel">
+          <div className="panel-headline">
+            <strong>Ventas de Cuenti</strong>
+          </div>
+
+          <form action="/domicilios" className="stack-form" method="get">
+            <input name="section" type="hidden" value="ventas" />
+            <div className="split-fields three-fields">
+              <label className="field">
+                <span>Desde</span>
+                <input defaultValue={salesDateFrom} name="saleFromDate" type="date" />
+              </label>
+              <label className="field">
+                <span>Hasta</span>
+                <input defaultValue={salesDateTo} name="saleToDate" type="date" />
+              </label>
+              <label className="field">
+                <span>Accion</span>
+                <button className="primary-button" type="submit">
+                  Buscar ventas
+                </button>
+              </label>
+            </div>
+          </form>
+
+          {cuentiSalesView?.error ? (
+            <div className="message message-error">{cuentiSalesView.error}</div>
+          ) : null}
+
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Documento</th>
+                  <th>Cliente</th>
+                  <th>Total</th>
+                  <th>Estado</th>
+                  <th>Accion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!cuentiSalesView || cuentiSalesView.sales.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      {cuentiSalesView?.error
+                        ? "No fue posible consultar ventas."
+                        : "Sin ventas de Cuenti para el filtro actual."}
+                    </td>
+                  </tr>
+                ) : (
+                  cuentiSalesView.sales.map((sale) => (
+                    <tr key={`${sale.branchId ?? "branch"}-${sale.cuentiSaleId}`}>
+                      <td>{sale.saleDate ? formatDate(sale.saleDate) : "-"}</td>
+                      <td>
+                        {sale.documentNumber ?? sale.cuentiSaleId}
+                        <span className="table-meta">ID: {sale.cuentiSaleId}</span>
+                      </td>
+                      <td>
+                        {sale.customerName ?? "-"}
+                        {sale.customerPhone ? (
+                          <span className="table-meta">{sale.customerPhone}</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        {sale.totalAmount === null ? "-" : formatMoney(sale.totalAmount)}
+                      </td>
+                      <td>{sale.status ?? "-"}</td>
+                      <td>
+                        <Link className="ghost-button" href={buildLoadSaleHref(sale)}>
+                          Cargar
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -482,9 +650,203 @@ function formatStatus(status: DeliveryServiceRecord["status"]) {
 }
 
 function normalizeSection(value?: string): DomiciliosSection {
+  if (value === "ventas") return "ventas";
   if (value === "servicios") return "servicios";
   if (value === "productos") return "productos";
   return "programar";
+}
+
+async function loadCuentiSalesView(input: {
+  dateFrom: string;
+  dateTo: string;
+}): Promise<CuentiSalesView> {
+  try {
+    const result = await getCuentiSales({
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      page: 1,
+      pageSize: 30
+    });
+
+    return {
+      branchCandidates: result.branchCandidates,
+      branchId: result.branchId,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      error: null,
+      rawItemsSeen: result.rawItemsSeen,
+      sales: result.sales
+    };
+  } catch (error) {
+    console.error("Error loading Cuenti sales", error);
+
+    return {
+      branchCandidates: [],
+      branchId: null,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      error: buildCuentiErrorMessage(error),
+      rawItemsSeen: 0,
+      sales: []
+    };
+  }
+}
+
+async function loadCuentiSaleSelection(ref: string): Promise<CuentiSaleSelectionView> {
+  try {
+    const sale = await getCuentiSaleDetail(ref);
+
+    return {
+      error: sale ? null : "No encontre el detalle de esta venta en Cuenti.",
+      sale
+    };
+  } catch (error) {
+    console.error("Error loading Cuenti sale detail", error);
+
+    return {
+      error: buildCuentiErrorMessage(error),
+      sale: null
+    };
+  }
+}
+
+function buildSalePrefill(
+  sale: CuentiSaleDetail,
+  overview: DeliveryServiceOverview,
+  today: string
+): SalePrefillView {
+  const matchedCustomer = findMatchingCustomer(sale, overview.customers);
+  const unmatchedProducts: string[] = [];
+  const rowsByProductId = new Map<
+    string,
+    { productId: string; quantity: number; tripCount: number }
+  >();
+
+  for (const item of sale.items) {
+    const product = findMatchingProduct(item, overview.products);
+
+    if (!product) {
+      unmatchedProducts.push(item.name);
+      continue;
+    }
+
+    const currentRow = rowsByProductId.get(product.id);
+
+    rowsByProductId.set(product.id, {
+      productId: product.id,
+      quantity: Math.round(((currentRow?.quantity ?? 0) + item.quantity) * 100) / 100,
+      tripCount: 1
+    });
+  }
+
+  const saleLabel = sale.documentNumber
+    ? `Factura ${sale.documentNumber}`
+    : `Venta Cuenti ${sale.cuentiSaleId}`;
+  const notes = [
+    saleLabel,
+    `ID Cuenti: ${sale.cuentiSaleId}`,
+    sale.customerName ? `Cliente Cuenti: ${sale.customerName}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    initialValue: {
+      customerAddress: sale.customerAddress ?? matchedCustomer?.address ?? "",
+      customerId: matchedCustomer?.id ?? "",
+      customerPhone: sale.customerPhone ?? matchedCustomer?.phone ?? "",
+      notes,
+      productRows: [...rowsByProductId.values()],
+      serviceOn: sale.saleDate ?? today
+    },
+    matchedProducts: rowsByProductId.size,
+    saleLabel,
+    unmatchedCustomer: !matchedCustomer,
+    unmatchedProducts: [...new Set(unmatchedProducts)]
+  };
+}
+
+function findMatchingCustomer(
+  sale: CuentiSaleDetail,
+  customers: DeliveryServiceOverview["customers"]
+) {
+  const cuentiCustomerId = normalizeComparableId(sale.cuentiCustomerId);
+  const identification = normalizeComparableId(sale.customerIdentification);
+  const customerName = normalizeComparableText(sale.customerName);
+
+  return (
+    customers.find(
+      (customer) =>
+        cuentiCustomerId &&
+        normalizeComparableId(customer.cuentiCustomerId) === cuentiCustomerId
+    ) ??
+    customers.find(
+      (customer) =>
+        identification &&
+        normalizeComparableId(customer.identification) === identification
+    ) ??
+    customers.find(
+      (customer) =>
+        customerName && normalizeComparableText(customer.name) === customerName
+    ) ??
+    null
+  );
+}
+
+function findMatchingProduct(
+  saleItem: CuentiSaleDetail["items"][number],
+  products: DeliveryServiceOverview["products"]
+) {
+  const cuentiProductId = normalizeComparableId(saleItem.cuentiProductId);
+  const sku = normalizeComparableId(saleItem.sku);
+  const productName = normalizeComparableText(saleItem.name);
+
+  return (
+    products.find(
+      (product) =>
+        cuentiProductId &&
+        normalizeComparableId(product.cuentiProductId) === cuentiProductId
+    ) ??
+    products.find((product) => sku && normalizeComparableId(product.sku) === sku) ??
+    products.find(
+      (product) => productName && normalizeComparableText(product.name) === productName
+    ) ??
+    null
+  );
+}
+
+function buildCuentiErrorMessage(error: unknown) {
+  if (error instanceof CuentiIntegrationError) {
+    return error.message;
+  }
+
+  return error instanceof Error
+    ? error.message
+    : "No fue posible consultar Cuenti.";
+}
+
+function normalizeDateParam(value?: string) {
+  const normalized = value?.trim();
+
+  return normalized && /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+}
+
+function normalizeComparableId(value?: string | null) {
+  return value
+    ?.trim()
+    .toLocaleLowerCase("es-CO")
+    .replace(/\s/g, "") ?? null;
+}
+
+function normalizeComparableText(value?: string | null) {
+  const normalized = value
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized || null;
 }
 
 function buildSectionHref(
@@ -503,6 +865,23 @@ function buildSectionHref(
   if (filters.toDate) params.set("toDate", filters.toDate);
   if (filters.status) params.set("status", filters.status);
   if (filters.sentProductId) params.set("sentProductId", filters.sentProductId);
+
+  return `/domicilios?${params.toString()}`;
+}
+
+function buildCuentiSalesHref(filters: { dateFrom: string; dateTo: string }) {
+  const params = new URLSearchParams();
+  params.set("section", "ventas");
+  params.set("saleFromDate", filters.dateFrom);
+  params.set("saleToDate", filters.dateTo);
+
+  return `/domicilios?${params.toString()}`;
+}
+
+function buildLoadSaleHref(sale: CuentiSaleSummary) {
+  const params = new URLSearchParams();
+  params.set("section", "programar");
+  params.set("saleRef", sale.cuentiSaleId);
 
   return `/domicilios?${params.toString()}`;
 }

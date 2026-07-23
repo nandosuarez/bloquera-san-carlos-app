@@ -90,6 +90,39 @@ export type CuentiProductStockResult = {
   stockQty: number | null;
 };
 
+export type CuentiSaleSummary = {
+  branchId: string | null;
+  cuentiCustomerId: string | null;
+  cuentiSaleId: string;
+  customerAddress: string | null;
+  customerIdentification: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  documentNumber: string | null;
+  saleDate: string | null;
+  status: string | null;
+  totalAmount: number | null;
+};
+
+export type CuentiSaleItem = {
+  cuentiProductId: string | null;
+  name: string;
+  quantity: number;
+  sku: string | null;
+  unitName: string | null;
+};
+
+export type CuentiSaleDetail = CuentiSaleSummary & {
+  items: CuentiSaleItem[];
+};
+
+export type CuentiSalesListResult = {
+  branchCandidates: string[];
+  branchId: string | null;
+  rawItemsSeen: number;
+  sales: CuentiSaleSummary[];
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -337,6 +370,145 @@ export async function getCuentiProductStock(
   };
 }
 
+export async function getCuentiSales(input?: {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  page?: number | null;
+  pageSize?: number | null;
+}): Promise<CuentiSalesListResult> {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const branchCandidates = await getCuentiProductBranchCandidates(
+    credentials,
+    status
+  );
+  let bestResult: CuentiSalesBranchResult | null = null;
+  let lastError: unknown = null;
+
+  for (const branchId of branchCandidates) {
+    try {
+      const requestedPage = normalizePositiveInteger(input?.page, 1);
+      const firstPageResult = await getCuentiSalesForBranch(
+        credentials,
+        branchId,
+        {
+          dateFrom: normalizeDateFilter(input?.dateFrom),
+          dateTo: normalizeDateFilter(input?.dateTo),
+          page: requestedPage,
+          pageSize: normalizePositiveInteger(input?.pageSize, 30)
+        }
+      );
+      const branchResult =
+        firstPageResult.rawItemsSeen > 0 || requestedPage === 0
+          ? firstPageResult
+          : await getCuentiSalesForBranch(credentials, branchId, {
+              dateFrom: normalizeDateFilter(input?.dateFrom),
+              dateTo: normalizeDateFilter(input?.dateTo),
+              page: 0,
+              pageSize: normalizePositiveInteger(input?.pageSize, 30)
+            });
+
+      if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
+        bestResult = branchResult;
+      }
+
+      if (branchResult.sales.length > 0) {
+        return {
+          branchCandidates,
+          branchId,
+          rawItemsSeen: branchResult.rawItemsSeen,
+          sales: branchResult.sales
+        };
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn("Could not load Cuenti sales for branch", {
+        branchId,
+        message: error instanceof Error ? error.message : "Unknown Cuenti error"
+      });
+    }
+  }
+
+  if (!bestResult && lastError) {
+    throw lastError;
+  }
+
+  return {
+    branchCandidates,
+    branchId: bestResult?.branchId ?? null,
+    rawItemsSeen: bestResult?.rawItemsSeen ?? 0,
+    sales: bestResult?.sales ?? []
+  };
+}
+
+export async function getCuentiSaleDetail(
+  ref: string
+): Promise<CuentiSaleDetail | null> {
+  const normalizedRef = normalizeOptionalText(ref);
+  const status = getCuentiConfigStatus();
+
+  if (!normalizedRef) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_sale_ref",
+      "Falta la referencia de la venta de Cuenti."
+    );
+  }
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const branchCandidates = await getCuentiProductBranchCandidates(
+    credentials,
+    status
+  );
+  let bestResult: CuentiSaleDetailBranchResult | null = null;
+  let lastError: unknown = null;
+
+  for (const branchId of branchCandidates) {
+    try {
+      const branchResult = await getCuentiSaleDetailForBranch(
+        credentials,
+        branchId,
+        normalizedRef
+      );
+
+      if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
+        bestResult = branchResult;
+      }
+
+      if (branchResult.sale) {
+        return branchResult.sale;
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn("Could not load Cuenti sale detail for branch", {
+        branchId,
+        message: error instanceof Error ? error.message : "Unknown Cuenti error",
+        ref: normalizedRef
+      });
+    }
+  }
+
+  if (!bestResult && lastError) {
+    throw lastError;
+  }
+
+  return bestResult?.sale ?? null;
+}
+
 type CuentiProductBranchResult = {
   branchId: string;
   products: CuentiProduct[];
@@ -347,6 +519,18 @@ type CuentiProductStockBranchResult = {
   branchId: string;
   rawItemsSeen: number;
   stockQty: number | null;
+};
+
+type CuentiSalesBranchResult = {
+  branchId: string;
+  rawItemsSeen: number;
+  sales: CuentiSaleSummary[];
+};
+
+type CuentiSaleDetailBranchResult = {
+  branchId: string;
+  rawItemsSeen: number;
+  sale: CuentiSaleDetail | null;
 };
 
 async function getCuentiProductsForBranch(
@@ -454,6 +638,64 @@ async function getCuentiProductStockForBranch(
     branchId,
     rawItemsSeen: items.length,
     stockQty
+  };
+}
+
+async function getCuentiSalesForBranch(
+  credentials: CuentiCredentials,
+  branchId: string,
+  input: {
+    dateFrom: string | null;
+    dateTo: string | null;
+    page: number;
+    pageSize: number;
+  }
+): Promise<CuentiSalesBranchResult> {
+  const searchParams: Record<string, string> = {
+    branchId,
+    page: String(input.page),
+    pageSize: String(input.pageSize)
+  };
+
+  if (input.dateFrom) searchParams.dateFrom = input.dateFrom;
+  if (input.dateTo) searchParams.dateTo = input.dateTo;
+
+  const payload = await requestCuentiData(credentials, "invoices", searchParams);
+  const items = extractResponseItems(payload);
+  const sales = items
+    .map((item) => mapCuentiSaleSummary(item, branchId))
+    .filter((item): item is CuentiSaleSummary => Boolean(item));
+
+  if (items.length > 0 && sales.length === 0) {
+    console.warn("Cuenti invoices response had raw items but no usable sales", {
+      branchId,
+      firstItemKeys: getInspectableKeys(items[0]),
+      rawItems: items.length
+    });
+  }
+
+  return {
+    branchId,
+    rawItemsSeen: items.length,
+    sales
+  };
+}
+
+async function getCuentiSaleDetailForBranch(
+  credentials: CuentiCredentials,
+  branchId: string,
+  ref: string
+): Promise<CuentiSaleDetailBranchResult> {
+  const payload = await requestCuentiData(credentials, "invoice", {
+    branchId,
+    ref
+  });
+  const sale = mapCuentiSaleDetail(payload, branchId, ref);
+
+  return {
+    branchId,
+    rawItemsSeen: countResponseItems(payload),
+    sale
   };
 }
 
@@ -658,6 +900,310 @@ function mapReferenceItem(
     detail: buildReferenceDetail(value, id, name),
     id: id ?? String(index + 1),
     name
+  };
+}
+
+function mapCuentiSaleSummary(
+  value: unknown,
+  branchId: string | null
+): CuentiSaleSummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const record = flattenRecord(value);
+  const cuentiSaleId = findFirstTextValue(record, [
+    "id_transaccion",
+    "idTransaccion",
+    "transactionId",
+    "transaction_id",
+    "id_factura",
+    "idFactura",
+    "invoiceId",
+    "invoice_id",
+    "id_venta",
+    "idVenta",
+    "saleId",
+    "id"
+  ]);
+  const documentNumber = findFirstTextValue(record, [
+    "numero_factura",
+    "numeroFactura",
+    "factura",
+    "consecutivo",
+    "numero_consecutivo",
+    "numeroConsecutivo",
+    "numero",
+    "documento",
+    "documentNumber",
+    "document_number",
+    "codigo",
+    "ref"
+  ]);
+  const customerName =
+    buildCuentiCustomerName(record) ??
+    findFirstTextValue(record, [
+      "nombre_tercero",
+      "tercero",
+      "customerName",
+      "customer_name",
+      "razon_social_cliente",
+      "cliente_nombre"
+    ]);
+  const saleDate = normalizeCuentiDate(
+    findFirstTextValue(record, [
+      "fecha",
+      "fecha_factura",
+      "fechaFactura",
+      "fecha_registro",
+      "fechaRegistro",
+      "createdAt",
+      "created_at",
+      "date",
+      "invoiceDate",
+      "saleDate"
+    ])
+  );
+  const totalAmount = findFirstNumberValue(record, [
+    "total",
+    "valor_total",
+    "valorTotal",
+    "total_factura",
+    "totalFactura",
+    "gran_total",
+    "grandTotal",
+    "neto",
+    "valor"
+  ]);
+
+  if (!cuentiSaleId && !documentNumber && !customerName) {
+    return null;
+  }
+
+  return {
+    branchId,
+    cuentiCustomerId: findFirstTextValue(record, [
+      "id_cliente",
+      "idCliente",
+      "customerId",
+      "id_customer",
+      "tercero_id",
+      "id_tercero"
+    ]),
+    cuentiSaleId: cuentiSaleId ?? documentNumber ?? `${customerName}-${saleDate ?? ""}`,
+    customerAddress: findFirstTextValue(record, [
+      "direccion",
+      "direccion_cliente",
+      "direccionCliente",
+      "customerAddress",
+      "address"
+    ]),
+    customerIdentification: findFirstTextValue(record, [
+      "identificacion",
+      "identificacion_cliente",
+      "numero_identificacion",
+      "nit",
+      "documento_cliente",
+      "document",
+      "customerDocument"
+    ]),
+    customerName,
+    customerPhone: findFirstTextValue(record, [
+      "telefono1",
+      "telefono2",
+      "telefono",
+      "telefono_cliente",
+      "customerPhone",
+      "phone",
+      "celular",
+      "mobile"
+    ]),
+    documentNumber,
+    saleDate,
+    status: findFirstTextValue(record, [
+      "estado",
+      "status",
+      "state",
+      "estado_factura",
+      "invoiceStatus"
+    ]),
+    totalAmount
+  };
+}
+
+function mapCuentiSaleDetail(
+  payload: CuentiRawResponse,
+  branchId: string,
+  fallbackRef: string
+): CuentiSaleDetail | null {
+  const detailSource = getCaseInsensitiveValue(payload, "data") ?? payload;
+  const headerSource = resolveCuentiSaleHeader(detailSource) ?? payload;
+  const summary =
+    mapCuentiSaleSummary(headerSource, branchId) ??
+    mapCuentiSaleSummary(payload, branchId) ?? {
+      branchId,
+      cuentiCustomerId: null,
+      cuentiSaleId: fallbackRef,
+      customerAddress: null,
+      customerIdentification: null,
+      customerName: null,
+      customerPhone: null,
+      documentNumber: null,
+      saleDate: null,
+      status: null,
+      totalAmount: null
+    };
+  const itemCandidates = extractCuentiSaleItemCandidates(detailSource);
+  const items = itemCandidates
+    .map(mapCuentiSaleItem)
+    .filter((item): item is CuentiSaleItem => Boolean(item));
+
+  return {
+    ...summary,
+    branchId,
+    cuentiSaleId: summary.cuentiSaleId || fallbackRef,
+    items
+  };
+}
+
+function resolveCuentiSaleHeader(value: unknown): unknown | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const headerKeys = [
+    "encabezado",
+    "header",
+    "factura",
+    "invoice",
+    "venta",
+    "sale",
+    "documento",
+    "document"
+  ];
+
+  for (const key of headerKeys) {
+    const nestedValue = getCaseInsensitiveValue(value, key);
+
+    if (isRecord(nestedValue)) {
+      return nestedValue;
+    }
+  }
+
+  return value;
+}
+
+function extractCuentiSaleItemCandidates(value: unknown, depth = 0): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!isRecord(value) || depth > 4) {
+    return [];
+  }
+
+  const itemKeys = [
+    "items",
+    "detalles",
+    "detalle",
+    "details",
+    "detail",
+    "lineas",
+    "lineItems",
+    "lines",
+    "productos",
+    "products",
+    "lstDetalle",
+    "lstProductos",
+    "detalleFactura",
+    "detalle_factura",
+    "invoiceItems"
+  ];
+
+  for (const key of itemKeys) {
+    const nestedValue = getCaseInsensitiveValue(value, key);
+
+    if (Array.isArray(nestedValue)) {
+      return nestedValue;
+    }
+
+    const nestedItems = extractCuentiSaleItemCandidates(nestedValue, depth + 1);
+
+    if (nestedItems.length > 0) {
+      return nestedItems;
+    }
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    if (Array.isArray(nestedValue)) {
+      return nestedValue;
+    }
+  }
+
+  return [];
+}
+
+function mapCuentiSaleItem(value: unknown): CuentiSaleItem | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const record = flattenRecord(value);
+  const name = findFirstTextValue(record, [
+    "nombre_producto",
+    "nombreProducto",
+    "producto",
+    "descripcion_producto",
+    "descripcion",
+    "description",
+    "nombre",
+    "name"
+  ]);
+  const cuentiProductId = findFirstTextValue(record, [
+    "id_producto",
+    "idProducto",
+    "productId",
+    "id_product",
+    "producto_id",
+    "id"
+  ]);
+  const sku = findFirstTextValue(record, [
+    "sku",
+    "referencia",
+    "codigo",
+    "codigo_interno",
+    "codigoInterno",
+    "code",
+    "ref"
+  ]);
+  const quantity = findFirstNumberValue(record, [
+    "cantidad",
+    "cantidad_producto",
+    "cantidadProducto",
+    "cantidad_vendida",
+    "cantidadVendida",
+    "quantity",
+    "qty",
+    "cant",
+    "unidades"
+  ]);
+
+  if ((!name && !cuentiProductId && !sku) || !quantity || quantity <= 0) {
+    return null;
+  }
+
+  return {
+    cuentiProductId,
+    name: name ?? sku ?? cuentiProductId ?? "Producto Cuenti",
+    quantity: Math.round(quantity * 100) / 100,
+    sku,
+    unitName: findFirstTextValue(record, [
+      "unidad",
+      "unit",
+      "unidad_medida",
+      "unidadMedida",
+      "unitName"
+    ])
   };
 }
 
@@ -1205,6 +1751,50 @@ function mergeCuentiProduct(
 
 function countResponseItems(payload: CuentiRawResponse) {
   return extractResponseItems(payload).length;
+}
+
+function normalizeDateFilter(value?: string | null) {
+  const normalized = normalizeOptionalText(value);
+
+  return normalized && /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+}
+
+function normalizeCuentiDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const slashMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+
+  if (slashMatch) {
+    const day = slashMatch[1].padStart(2, "0");
+    const month = slashMatch[2].padStart(2, "0");
+
+    return `${slashMatch[3]}-${month}-${day}`;
+  }
+
+  const parsed = new Date(normalized);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Bogota"
+  }).format(parsed);
+}
+
+function normalizePositiveInteger(value: number | null | undefined, fallback: number) {
+  return Number.isInteger(value) && value !== null && value !== undefined && value >= 0
+    ? value
+    : fallback;
 }
 
 function normalizeUrl(value: string) {
