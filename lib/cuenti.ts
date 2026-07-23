@@ -126,17 +126,6 @@ export type CuentiSalesListResult = {
   sales: CuentiSaleSummary[];
 };
 
-export type CuentiSalesDiagnostic = {
-  branchId: string;
-  endpoint: string;
-  error: string | null;
-  fields: Array<{
-    key: string;
-    value: string;
-  }>;
-  itemCount: number;
-};
-
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -452,74 +441,6 @@ export async function getCuentiSales(input?: {
     rawItemsSeen: bestResult?.rawItemsSeen ?? 0,
     sales: bestResult?.sales ?? []
   };
-}
-
-export async function getCuentiSalesDiagnostics(input: {
-  dateFrom: string;
-  dateTo: string;
-}): Promise<CuentiSalesDiagnostic[]> {
-  const status = getCuentiConfigStatus();
-  const credentials = getCuentiCredentials();
-  const branchCandidates = await getCuentiProductBranchCandidates(
-    credentials,
-    status
-  );
-  const diagnostics: CuentiSalesDiagnostic[] = [];
-
-  for (const branchId of branchCandidates) {
-    for (const endpoint of ["invoices", "orders"]) {
-      try {
-        const payload = await requestCuentiData(credentials, endpoint, {
-          branchId,
-          dateFrom: normalizeDateFilter(input.dateFrom) ?? input.dateFrom,
-          dateTo: normalizeDateFilter(input.dateTo) ?? input.dateTo,
-          page: "1",
-          pageSize: "5"
-        });
-        const items = extractResponseItems(payload);
-
-        diagnostics.push({
-          branchId,
-          endpoint,
-          error: null,
-          fields: inspectPrimitiveFields(items[0]),
-          itemCount: items.length
-        });
-
-        const firstItem = items[0];
-        const source: CuentiSaleSource =
-          endpoint === "orders" ? "order" : "invoice";
-        const transactionId = isRecord(firstItem)
-          ? findCuentiTransactionId(flattenRecord(firstItem), source)
-          : null;
-
-        if (transactionId) {
-          const detailPayload = await requestCuentiData(credentials, source, {
-            branchId,
-            ref: transactionId
-          });
-
-          diagnostics.push({
-            branchId,
-            endpoint: `${source}-detail`,
-            error: null,
-            fields: inspectPrimitiveFields(detailPayload),
-            itemCount: countResponseItems(detailPayload)
-          });
-        }
-      } catch (error) {
-        diagnostics.push({
-          branchId,
-          endpoint,
-          error: error instanceof Error ? error.message : "Error desconocido",
-          fields: [],
-          itemCount: 0
-        });
-      }
-    }
-  }
-
-  return diagnostics;
 }
 
 export async function getCuentiSaleDetail(
@@ -1399,6 +1320,7 @@ function mapCuentiSaleItem(value: unknown): CuentiSaleItem | null {
   const name = findFirstTextValue(record, [
     "nombre_producto",
     "nombreProducto",
+    "product_name",
     "producto",
     "descripcion_producto",
     "descripcion",
@@ -1416,6 +1338,7 @@ function mapCuentiSaleItem(value: unknown): CuentiSaleItem | null {
   ]);
   const sku = findFirstTextValue(record, [
     "sku",
+    "product_code",
     "referencia",
     "codigo",
     "codigo_interno",
@@ -1514,6 +1437,7 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
   const name = findFirstTextValue(record, [
     "nombre_producto",
     "nombreProducto",
+    "product_name",
     "producto",
     "descripcion_producto",
     "descripcion",
@@ -1535,6 +1459,7 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
   ]);
   const sku = findFirstTextValue(record, [
     "sku",
+    "product_code",
     "referencia",
     "codigo",
     "codigo_interno",
@@ -1782,45 +1707,6 @@ function getInspectableKeys(value: unknown) {
   }
 
   return Object.keys(value).slice(0, 20);
-}
-
-function inspectPrimitiveFields(value: unknown) {
-  const fields: Array<{ key: string; value: string }> = [];
-
-  function visit(current: unknown, path: string, depth: number) {
-    if (fields.length >= 300 || depth > 7) {
-      return;
-    }
-
-    const textValue = normalizeUnknownText(current);
-
-    if (textValue) {
-      fields.push({
-        key: path || "value",
-        value: textValue.slice(0, 120)
-      });
-      return;
-    }
-
-    if (Array.isArray(current)) {
-      if (current.length > 0) {
-        visit(current[0], `${path}[0]`, depth + 1);
-      }
-      return;
-    }
-
-    if (!isRecord(current)) {
-      return;
-    }
-
-    for (const [key, nestedValue] of Object.entries(current)) {
-      visit(nestedValue, path ? `${path}.${key}` : key, depth + 1);
-    }
-  }
-
-  visit(value, "", 0);
-
-  return fields;
 }
 
 function findFirstTextValue(record: Record<string, unknown>, keys: string[]) {
