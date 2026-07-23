@@ -85,7 +85,7 @@ export function getCuentiConfigStatus(): CuentiConfigStatus {
   const companyId =
     normalizeOptionalText(process.env.CUENTI_COMPANY_ID) ??
     DEFAULT_CUENTI_COMPANY_ID;
-  const branchId = normalizeOptionalText(process.env.CUENTI_BRANCH_ID);
+  const branchId = normalizeOptionalText(process.env.CUENTI_BRANCH_ID) ?? companyId;
   const warehouseId = normalizeOptionalText(process.env.CUENTI_WAREHOUSE_ID);
   const sellerId = normalizeOptionalText(process.env.CUENTI_SELLER_ID);
   const employeeId = normalizeOptionalText(process.env.CUENTI_EMPLOYEE_ID);
