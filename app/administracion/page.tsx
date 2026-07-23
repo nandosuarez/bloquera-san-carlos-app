@@ -58,14 +58,17 @@ const successMessages: Record<string, string> = {
 
 type AdministrationPageProps = {
   searchParams?: {
+    branch?: string;
     branches?: string;
     catalogs?: string;
     created?: string;
     error?: string;
+    raw?: string;
     section?: string;
     skipped?: string;
     success?: string;
     total?: string;
+    tried?: string;
     updated?: string;
   };
 };
@@ -267,12 +270,23 @@ function buildCuentiCustomerSyncMessage(
 function buildCuentiProductSyncMessage(
   searchParams?: AdministrationPageProps["searchParams"]
 ) {
+  const branch = searchParams?.branch;
   const created = Number(searchParams?.created ?? 0);
+  const raw = Number(searchParams?.raw ?? 0);
   const updated = Number(searchParams?.updated ?? 0);
   const skipped = Number(searchParams?.skipped ?? 0);
   const total = Number(searchParams?.total ?? created + updated + skipped);
+  const tried = searchParams?.tried
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(", ");
 
-  return `Productos de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
+  if (total === 0) {
+    return `Productos de Cuenti sincronizados. Total: 0. Cuenti devolvio ${raw} registros crudos. Sucursales probadas: ${tried || branch || "sin dato"}.`;
+  }
+
+  return `Productos de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}. Sucursal usada: ${branch || "sin dato"}.`;
 }
 
 async function loadCuentiReferenceData() {

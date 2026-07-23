@@ -9,6 +9,12 @@ type CuentiRawResponse = {
   success?: boolean;
 };
 
+type CuentiCredentials = {
+  baseUrl: string;
+  companyId: string;
+  token: string;
+};
+
 export type CuentiConfigStatus = {
   baseUrl: string;
   branchId: string | null;
@@ -68,6 +74,13 @@ export type CuentiProduct = {
   stockQty: number | null;
   unitName: string | null;
   weightKg: number | null;
+};
+
+export type CuentiProductListResult = {
+  branchCandidates: string[];
+  branchId: string | null;
+  products: CuentiProduct[];
+  rawItemsSeen: number;
 };
 
 export class CuentiIntegrationError extends Error {
@@ -208,7 +221,7 @@ export async function getAllCuentiCustomers(): Promise<CuentiCustomer[]> {
   return dedupeCuentiCustomers(customers);
 }
 
-export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
+export async function getAllCuentiProducts(): Promise<CuentiProductListResult> {
   const status = getCuentiConfigStatus();
 
   if (!status.branchId) {
@@ -219,14 +232,60 @@ export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
   }
 
   const credentials = getCuentiCredentials();
+  const branchCandidates = await getCuentiProductBranchCandidates(
+    credentials,
+    status
+  );
+  let bestResult: CuentiProductBranchResult | null = null;
+
+  for (const branchId of branchCandidates) {
+    const firstPageResult = await getCuentiProductsForBranch(credentials, branchId, 1);
+    const branchResult =
+      firstPageResult.rawItemsSeen > 0
+        ? firstPageResult
+        : await getCuentiProductsForBranch(credentials, branchId, 0);
+
+    if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
+      bestResult = branchResult;
+    }
+
+    if (branchResult.products.length > 0) {
+      return {
+        branchCandidates,
+        branchId,
+        products: dedupeCuentiProducts(branchResult.products),
+        rawItemsSeen: branchResult.rawItemsSeen
+      };
+    }
+  }
+
+  return {
+    branchCandidates,
+    branchId: bestResult?.branchId ?? null,
+    products: [],
+    rawItemsSeen: bestResult?.rawItemsSeen ?? 0
+  };
+}
+
+type CuentiProductBranchResult = {
+  branchId: string;
+  products: CuentiProduct[];
+  rawItemsSeen: number;
+};
+
+async function getCuentiProductsForBranch(
+  credentials: CuentiCredentials,
+  branchId: string,
+  firstPage: number
+): Promise<CuentiProductBranchResult> {
   const products: CuentiProduct[] = [];
   const defaultProductPageSize = 20;
   const maxPages = 100;
   let rawItemsSeen = 0;
 
-  for (let page = 1; page <= maxPages; page += 1) {
+  for (let page = firstPage; page < firstPage + maxPages; page += 1) {
     const payload = await requestCuentiData(credentials, "products", {
-      branchId: status.branchId,
+      branchId,
       page: String(page)
     });
     const items = extractResponseItems(payload);
@@ -244,6 +303,7 @@ export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
 
     if (items.length > 0 && mappedOnPage === 0) {
       console.warn("Cuenti products page had items but none could be mapped", {
+        branchId,
         firstItemKeys: getInspectableKeys(items[0]),
         page,
         rawItems: items.length
@@ -259,14 +319,41 @@ export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
 
   if (rawItemsSeen > 0 && products.length === 0) {
     console.warn("Cuenti products response had raw items but no usable products", {
+      branchId,
       rawItemsSeen
     });
   }
 
-  return dedupeCuentiProducts(products);
+  return {
+    branchId,
+    products,
+    rawItemsSeen
+  };
 }
 
-function getCuentiCredentials() {
+async function getCuentiProductBranchCandidates(
+  credentials: CuentiCredentials,
+  status: CuentiConfigStatus
+) {
+  const candidates = [status.branchId, status.companyId].filter(
+    (value): value is string => Boolean(value)
+  );
+
+  try {
+    const payload = await requestCuentiData(credentials, "branches");
+    const branchIds = extractCatalogItems(payload, "branches").map((branch) => branch.id);
+
+    candidates.push(...branchIds);
+  } catch (error) {
+    console.warn("Could not load Cuenti branches before product sync", {
+      message: error instanceof Error ? error.message : "Unknown Cuenti error"
+    });
+  }
+
+  return uniqueStrings(candidates);
+}
+
+function getCuentiCredentials(): CuentiCredentials {
   const status = getCuentiConfigStatus();
   const token = normalizeOptionalText(process.env.CUENTI_API_TOKEN);
 
@@ -292,11 +379,7 @@ function getCuentiCredentials() {
 }
 
 async function requestCuentiData(
-  credentials: {
-    baseUrl: string;
-    companyId: string;
-    token: string;
-  },
+  credentials: CuentiCredentials,
   endpoint: string,
   searchParams: Record<string, string> = {}
 ) {
@@ -335,10 +418,7 @@ async function requestCuentiData(
   return payload;
 }
 
-function buildCuentiHeaders(credentials: {
-  companyId: string;
-  token: string;
-}) {
+function buildCuentiHeaders(credentials: CuentiCredentials) {
   return {
     Accept: "application/json",
     Authorization: `Bearer ${credentials.token}`,
@@ -990,6 +1070,10 @@ function normalizeUrl(value: string) {
 function normalizeOptionalText(value?: string | null) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

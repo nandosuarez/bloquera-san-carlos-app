@@ -3,14 +3,18 @@ import { getDb } from "@/lib/db";
 import type { PoolClient } from "pg";
 
 export type CuentiProductSyncResult = {
+  branchCandidates: string[];
+  branchId: string | null;
   created: number;
+  rawRows: number;
   skipped: number;
   totalRows: number;
   updated: number;
 };
 
 export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult> {
-  const cuentiProducts = await getAllCuentiProducts();
+  const productList = await getAllCuentiProducts();
+  const cuentiProducts = productList.products;
   const client = await getDb().connect();
   let created = 0;
   let skipped = 0;
@@ -126,7 +130,10 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
   }
 
   return {
+    branchCandidates: productList.branchCandidates,
+    branchId: productList.branchId,
     created,
+    rawRows: productList.rawItemsSeen,
     skipped,
     totalRows: cuentiProducts.length,
     updated

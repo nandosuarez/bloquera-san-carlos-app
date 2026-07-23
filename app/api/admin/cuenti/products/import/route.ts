@@ -18,10 +18,13 @@ export async function POST(request: NextRequest) {
   try {
     const result = await syncProductsFromCuenti();
     const query = new URLSearchParams({
+      branch: result.branchId ?? "",
       created: String(result.created),
+      raw: String(result.rawRows),
       skipped: String(result.skipped),
       success: "cuenti_products_synced",
       total: String(result.totalRows),
+      tried: result.branchCandidates.join(","),
       updated: String(result.updated)
     });
 
