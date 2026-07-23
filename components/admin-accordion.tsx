@@ -14,7 +14,9 @@ type SectionId =
   | "cuenti";
 
 type CustomerView = {
+  cuentiCustomerId: string | null;
   id: string;
+  identification: string | null;
   name: string;
   phone: string | null;
 };
@@ -231,6 +233,29 @@ function CuentiSection({
           Consultar IDs en Cuenti
         </button>
       </form>
+
+      <section className="import-card">
+        <div>
+          <strong>Clientes de Cuenti</strong>
+          <p>
+            Trae los clientes registrados en Cuenti y los crea o actualiza en la
+            app usando el ID de Cuenti, la identificacion o el nombre.
+          </p>
+        </div>
+        <form
+          action="/api/admin/cuenti/customers/import"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries}
+            type="submit"
+          >
+            Sincronizar clientes
+          </button>
+        </form>
+      </section>
 
       <div className="table-wrap">
         <table className="data-table">
@@ -497,19 +522,23 @@ function CustomerSection({ customers }: { customers: CustomerView[] }) {
           <thead>
             <tr>
               <th>Nombre</th>
+              <th>Identificacion</th>
               <th>Telefono</th>
+              <th>Cuenti</th>
             </tr>
           </thead>
           <tbody>
             {filteredCustomers.length === 0 ? (
               <tr>
-                <td colSpan={2}>No encontre clientes con esa busqueda.</td>
+                <td colSpan={4}>No encontre clientes con esa busqueda.</td>
               </tr>
             ) : (
               filteredCustomers.map((customer) => (
                 <tr key={customer.id}>
                   <td>{customer.name}</td>
+                  <td>{customer.identification ?? "-"}</td>
                   <td>{customer.phone ?? "-"}</td>
+                  <td>{customer.cuentiCustomerId ? "Conectado" : "-"}</td>
                 </tr>
               ))
             )}
@@ -528,9 +557,9 @@ function filterCustomers(customers: CustomerView[], query: string) {
   }
 
   return customers.filter((customer) =>
-    normalizeSearchText(`${customer.name} ${customer.phone ?? ""}`).includes(
-      normalizedQuery
-    )
+    normalizeSearchText(
+      `${customer.name} ${customer.phone ?? ""} ${customer.identification ?? ""} ${customer.cuentiCustomerId ?? ""}`
+    ).includes(normalizedQuery)
   );
 }
 

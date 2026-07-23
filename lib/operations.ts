@@ -22,8 +22,10 @@ type HomeStatsRow = {
 
 type CustomerRow = {
   address: string | null;
+  cuenti_customer_id: string | null;
   created_at: Date;
   id: string;
+  identification: string | null;
   is_active: boolean;
   name: string;
   notes: string | null;
@@ -225,8 +227,10 @@ export type HomeStats = {
 
 export type Customer = {
   address: string | null;
+  cuentiCustomerId: string | null;
   createdAt: Date;
   id: string;
+  identification: string | null;
   isActive: boolean;
   name: string;
   notes: string | null;
@@ -1681,6 +1685,8 @@ async function listCustomers(): Promise<Customer[]> {
       SELECT
         id,
         name,
+        cuenti_customer_id,
+        identification,
         phone,
         address,
         notes,
@@ -1864,8 +1870,10 @@ function mapHomeStats(row: HomeStatsRow | undefined): HomeStats {
 function mapCustomer(row: CustomerRow): Customer {
   return {
     address: row.address,
+    cuentiCustomerId: row.cuenti_customer_id,
     createdAt: row.created_at,
     id: row.id,
+    identification: row.identification,
     isActive: row.is_active,
     name: row.name,
     notes: row.notes,

@@ -46,6 +46,7 @@ const successMessages: Record<string, string> = {
   collaborator_saved: "Colaborador guardado.",
   customers_imported: "Clientes importados.",
   cuenti_connected: "Conexion con Cuenti exitosa.",
+  cuenti_customers_synced: "Clientes sincronizados desde Cuenti.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
   product_line_saved: "Linea guardada.",
@@ -66,6 +67,7 @@ type AdministrationPageProps = {
     section?: string;
     skipped?: string;
     success?: string;
+    total?: string;
     updated?: string;
   };
 };
@@ -108,6 +110,8 @@ export default async function AdministrationPage({
       ? buildImportSuccessMessage(searchParams)
       : successCode === "cuenti_connected"
         ? buildCuentiSuccessMessage(searchParams)
+      : successCode === "cuenti_customers_synced"
+        ? buildCuentiCustomerSyncMessage(searchParams)
       : successCode
         ? successMessages[successCode] ?? null
         : null;
@@ -161,7 +165,9 @@ export default async function AdministrationPage({
           roleTitle: collaborator.roleTitle
         }))}
         customers={overview.customers.map((customer) => ({
+          cuentiCustomerId: customer.cuentiCustomerId,
           id: customer.id,
+          identification: customer.identification,
           name: customer.name,
           phone: customer.phone
         }))}
@@ -254,6 +260,17 @@ function buildCuentiSuccessMessage(searchParams?: AdministrationPageProps["searc
   }
 
   return `Conexion con Cuenti exitosa. Sucursales encontradas: ${branches}.`;
+}
+
+function buildCuentiCustomerSyncMessage(
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  const created = Number(searchParams?.created ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const skipped = Number(searchParams?.skipped ?? 0);
+  const total = Number(searchParams?.total ?? created + updated + skipped);
+
+  return `Clientes de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
 }
 
 async function loadCuentiReferenceData() {

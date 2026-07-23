@@ -46,6 +46,16 @@ export type CuentiReferenceData = {
   paymentMethods: CuentiReferenceItem[];
 };
 
+export type CuentiCustomer = {
+  address: string | null;
+  cuentiCustomerId: string | null;
+  email: string | null;
+  identification: string | null;
+  name: string;
+  notes: string | null;
+  phone: string | null;
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -153,6 +163,37 @@ export async function getCuentiReferenceData(): Promise<CuentiReferenceData> {
   };
 }
 
+export async function getAllCuentiCustomers(): Promise<CuentiCustomer[]> {
+  const credentials = getCuentiCredentials();
+  const customers: CuentiCustomer[] = [];
+  const pageSize = 100;
+  const maxPages = 100;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const payload = await requestCuentiData(credentials, "customers", {
+      page: String(page),
+      pageSize: String(pageSize)
+    });
+    const items = extractResponseItems(payload);
+
+    for (const item of items) {
+      const customer = mapCuentiCustomer(item);
+
+      if (customer) {
+        customers.push(customer);
+      }
+    }
+
+    const pagination = extractPagination(payload);
+
+    if (items.length === 0) break;
+    if (pagination.totalPages && page >= pagination.totalPages) break;
+    if (!pagination.totalPages && items.length < pageSize) break;
+  }
+
+  return dedupeCuentiCustomers(customers);
+}
+
 function getCuentiCredentials() {
   const status = getCuentiConfigStatus();
   const token = normalizeOptionalText(process.env.CUENTI_API_TOKEN);
@@ -184,12 +225,17 @@ async function requestCuentiData(
     companyId: string;
     token: string;
   },
-  endpoint: string
+  endpoint: string,
+  searchParams: Record<string, string> = {}
 ) {
   const url = new URL(
     `${credentials.baseUrl}/integrations/generic/data/${endpoint}`
   );
   url.searchParams.set("companyId", credentials.companyId);
+
+  for (const [key, value] of Object.entries(searchParams)) {
+    url.searchParams.set(key, value);
+  }
 
   let response: Response;
 
@@ -309,6 +355,84 @@ function mapReferenceItem(
     id: id ?? String(index + 1),
     name
   };
+}
+
+function mapCuentiCustomer(value: unknown): CuentiCustomer | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const name = buildCuentiCustomerName(value);
+
+  if (!name) {
+    return null;
+  }
+
+  const cuentiCustomerId = findFirstTextValue(value, [
+    "id_cliente",
+    "idCliente",
+    "customerId",
+    "id_customer",
+    "id"
+  ]);
+  const identification = findFirstTextValue(value, [
+    "identificacion",
+    "numero_identificacion",
+    "id_number",
+    "nit",
+    "documento",
+    "document",
+    "codigo_interno"
+  ]);
+  const phone = findFirstTextValue(value, [
+    "telefono1",
+    "telefono2",
+    "telefono3",
+    "telefono",
+    "phone",
+    "celular",
+    "mobile"
+  ]);
+  const address = findFirstTextValue(value, ["direccion", "address"]);
+  const email = findFirstTextValue(value, ["email1", "email2", "email", "correo"]);
+  const notes = findFirstTextValue(value, ["nota", "notas", "notes"]);
+
+  return {
+    address,
+    cuentiCustomerId,
+    email,
+    identification,
+    name,
+    notes,
+    phone
+  };
+}
+
+function buildCuentiCustomerName(record: Record<string, unknown>) {
+  const directName = findFirstTextValue(record, [
+    "nombre_cliente",
+    "nombreCliente",
+    "cliente",
+    "razon_social",
+    "razonSocial",
+    "nombre",
+    "name"
+  ]);
+
+  if (directName) {
+    return directName;
+  }
+
+  const nameParts = [
+    "primer_nombre",
+    "segundo_nombre",
+    "primer_apellido",
+    "segundo_apellido"
+  ]
+    .map((key) => findFirstTextValue(record, [key]))
+    .filter(Boolean);
+
+  return nameParts.length > 0 ? nameParts.join(" ") : null;
 }
 
 function buildIdKeys(endpoint: string) {
@@ -436,6 +560,56 @@ function getCatalogItems(
   endpoint: string
 ) {
   return results.find((result) => result.endpoint === endpoint)?.items ?? [];
+}
+
+function extractPagination(payload: CuentiRawResponse) {
+  const data = payload.data;
+
+  if (!isRecord(data) || !isRecord(data.pagination)) {
+    return {
+      totalPages: null
+    };
+  }
+
+  const totalPages = Number(data.pagination.totalPages);
+
+  return {
+    totalPages: Number.isFinite(totalPages) && totalPages > 0 ? totalPages : null
+  };
+}
+
+function dedupeCuentiCustomers(customers: CuentiCustomer[]) {
+  const customersByKey = new Map<string, CuentiCustomer>();
+
+  for (const customer of customers) {
+    const key =
+      customer.cuentiCustomerId ??
+      customer.identification ??
+      customer.name.toLocaleLowerCase("es-CO");
+
+    customersByKey.set(key, mergeCuentiCustomer(customersByKey.get(key), customer));
+  }
+
+  return [...customersByKey.values()];
+}
+
+function mergeCuentiCustomer(
+  current: CuentiCustomer | undefined,
+  next: CuentiCustomer
+): CuentiCustomer {
+  if (!current) {
+    return next;
+  }
+
+  return {
+    address: next.address ?? current.address,
+    cuentiCustomerId: next.cuentiCustomerId ?? current.cuentiCustomerId,
+    email: next.email ?? current.email,
+    identification: next.identification ?? current.identification,
+    name: next.name || current.name,
+    notes: next.notes ?? current.notes,
+    phone: next.phone ?? current.phone
+  };
 }
 
 function countResponseItems(payload: CuentiRawResponse) {

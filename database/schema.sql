@@ -61,6 +61,8 @@ CREATE INDEX IF NOT EXISTS audit_log_entity_idx
 CREATE TABLE IF NOT EXISTS customer (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(160) NOT NULL,
+  cuenti_customer_id VARCHAR(80) NULL,
+  identification VARCHAR(80) NULL,
   phone VARCHAR(40) NULL,
   address TEXT NULL,
   notes TEXT NULL,
@@ -71,6 +73,20 @@ CREATE TABLE IF NOT EXISTS customer (
 
 CREATE UNIQUE INDEX IF NOT EXISTS customer_name_unique
   ON customer (LOWER(name));
+
+ALTER TABLE customer
+ADD COLUMN IF NOT EXISTS cuenti_customer_id VARCHAR(80) NULL;
+
+ALTER TABLE customer
+ADD COLUMN IF NOT EXISTS identification VARCHAR(80) NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS customer_cuenti_customer_id_unique
+  ON customer (cuenti_customer_id)
+  WHERE cuenti_customer_id IS NOT NULL AND BTRIM(cuenti_customer_id) <> '';
+
+CREATE INDEX IF NOT EXISTS customer_identification_idx
+  ON customer (identification)
+  WHERE identification IS NOT NULL AND BTRIM(identification) <> '';
 
 DROP TRIGGER IF EXISTS trg_customer_updated_at ON customer;
 
