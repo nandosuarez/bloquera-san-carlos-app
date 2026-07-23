@@ -311,9 +311,21 @@ export default async function DomiciliosPage({ searchParams }: DomiciliosPagePro
                       </td>
                       <td>{sale.status ?? "-"}</td>
                       <td>
-                        <Link className="ghost-button" href={buildLoadSaleHref(sale)}>
-                          Cargar
-                        </Link>
+                        <form action="/api/domicilios/cuenti/load" method="post">
+                          <input
+                            name="saleRef"
+                            type="hidden"
+                            value={sale.cuentiSaleId}
+                          />
+                          <input
+                            name="saleSource"
+                            type="hidden"
+                            value={sale.source}
+                          />
+                          <button className="ghost-button" type="submit">
+                            Cargar
+                          </button>
+                        </form>
                       </td>
                     </tr>
                   ))
@@ -897,15 +909,6 @@ function buildCuentiSalesHref(filters: { dateFrom: string; dateTo: string }) {
   params.set("section", "ventas");
   params.set("saleFromDate", filters.dateFrom);
   params.set("saleToDate", filters.dateTo);
-
-  return `/domicilios?${params.toString()}`;
-}
-
-function buildLoadSaleHref(sale: CuentiSaleSummary) {
-  const params = new URLSearchParams();
-  params.set("section", "programar");
-  params.set("saleRef", sale.cuentiSaleId);
-  params.set("saleSource", sale.source);
 
   return `/domicilios?${params.toString()}`;
 }

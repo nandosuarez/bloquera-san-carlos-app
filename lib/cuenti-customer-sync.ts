@@ -9,6 +9,67 @@ export type CuentiCustomerSyncResult = {
   updated: number;
 };
 
+export async function upsertCuentiCustomer(customer: CuentiCustomer) {
+  if (!customer.name.trim()) {
+    return null;
+  }
+
+  const client = await getDb().connect();
+
+  try {
+    await client.query("BEGIN");
+    await ensureCuentiCustomerColumns(client);
+    const existingId = await findExistingCustomerId(client, customer);
+    let customerId = existingId;
+
+    if (existingId) {
+      await updateCustomer(client, existingId, customer);
+    } else {
+      const result = await client.query<{ id: string }>(
+        `
+          INSERT INTO customer (
+            name,
+            cuenti_customer_id,
+            identification,
+            phone,
+            address,
+            notes,
+            is_active
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+          ON CONFLICT ((LOWER(name)))
+          DO UPDATE SET
+            cuenti_customer_id = COALESCE(EXCLUDED.cuenti_customer_id, customer.cuenti_customer_id),
+            identification = COALESCE(EXCLUDED.identification, customer.identification),
+            phone = COALESCE(EXCLUDED.phone, customer.phone),
+            address = COALESCE(EXCLUDED.address, customer.address),
+            notes = COALESCE(customer.notes, EXCLUDED.notes),
+            is_active = TRUE,
+            updated_at = NOW()
+          RETURNING id
+        `,
+        [
+          customer.name.trim(),
+          normalizeOptionalText(customer.cuentiCustomerId),
+          normalizeOptionalText(customer.identification),
+          normalizeOptionalText(customer.phone),
+          normalizeOptionalText(customer.address),
+          buildCustomerNotes(customer)
+        ]
+      );
+      customerId = result.rows[0]?.id ?? null;
+    }
+
+    await client.query("COMMIT");
+    return customerId;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function syncCustomersFromCuenti(): Promise<CuentiCustomerSyncResult> {
   const cuentiCustomers = await getAllCuentiCustomers();
   const client = await getDb().connect();
@@ -139,6 +200,61 @@ async function ensureCuentiCustomerColumns(client: PoolClient) {
   `);
 }
 
+async function findExistingCustomerId(
+  client: PoolClient,
+  customer: CuentiCustomer
+) {
+  const cuentiCustomerId = normalizeOptionalText(customer.cuentiCustomerId);
+
+  if (cuentiCustomerId) {
+    const result = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM customer
+        WHERE cuenti_customer_id = $1
+        LIMIT 1
+      `,
+      [cuentiCustomerId]
+    );
+
+    if (result.rows[0]?.id) {
+      return result.rows[0].id;
+    }
+  }
+
+  const identification = normalizeOptionalText(customer.identification);
+
+  if (identification) {
+    const result = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM customer
+        WHERE REGEXP_REPLACE(COALESCE(identification, ''), '[^a-zA-Z0-9]', '', 'g')
+          = REGEXP_REPLACE($1, '[^a-zA-Z0-9]', '', 'g')
+        LIMIT 1
+      `,
+      [identification]
+    );
+
+    if (result.rows[0]?.id) {
+      return result.rows[0].id;
+    }
+  }
+
+  const result = await client.query<{ id: string }>(
+    `
+      SELECT id
+      FROM customer
+      WHERE REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g')
+        = REGEXP_REPLACE(LOWER($1), '[^a-z0-9]', '', 'g')
+      LIMIT 1
+    `,
+    [customer.name]
+  );
+
+  return result.rows[0]?.id ?? null;
+}
+
 async function updateCustomer(
   client: PoolClient,
   customerId: string,
@@ -186,4 +302,9 @@ function buildCustomerNotes(customer: CuentiCustomer) {
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join(" | ") : null;
+}
+
+function normalizeOptionalText(value?: string | null) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
