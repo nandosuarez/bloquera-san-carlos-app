@@ -485,6 +485,28 @@ export async function getCuentiSalesDiagnostics(input: {
           fields: inspectPrimitiveFields(items[0]),
           itemCount: items.length
         });
+
+        const firstItem = items[0];
+        const source: CuentiSaleSource =
+          endpoint === "orders" ? "order" : "invoice";
+        const transactionId = isRecord(firstItem)
+          ? findCuentiTransactionId(flattenRecord(firstItem), source)
+          : null;
+
+        if (transactionId) {
+          const detailPayload = await requestCuentiData(credentials, source, {
+            branchId,
+            ref: transactionId
+          });
+
+          diagnostics.push({
+            branchId,
+            endpoint: `${source}-detail`,
+            error: null,
+            fields: inspectPrimitiveFields(detailPayload),
+            itemCount: countResponseItems(detailPayload)
+          });
+        }
       } catch (error) {
         diagnostics.push({
           branchId,
@@ -1001,28 +1023,12 @@ function mapCuentiSaleSummary(
   }
 
   const record = flattenRecord(value);
-  const cuentiSaleId = findFirstTextValue(record, [
-    "id_transaccion",
-    "idTransaccion",
-    "transactionId",
-    "transaction_id",
-    "id_factura",
-    "idFactura",
-    "invoiceId",
-    "invoice_id",
-    "id_pedido",
-    "idPedido",
-    "orderId",
-    "order_id",
-    "id_venta",
-    "idVenta",
-    "saleId",
-    "id"
-  ]);
+  const cuentiSaleId = findCuentiTransactionId(record, source);
   const documentNumber = findFirstTextValue(record, [
     "numero_factura",
     "numeroFactura",
     "factura",
+    "invoice_number",
     "numero_pedido",
     "numeroPedido",
     "pedido",
@@ -1036,7 +1042,8 @@ function mapCuentiSaleSummary(
     "documentNumber",
     "document_number",
     "codigo",
-    "ref"
+    "ref",
+    "referencia"
   ]);
   const customerName =
     buildCuentiCustomerName(record) ??
@@ -1051,6 +1058,7 @@ function mapCuentiSaleSummary(
   const saleDate = normalizeCuentiDate(
     findFirstTextValue(record, [
       "fecha",
+      "date_register",
       "fecha_factura",
       "fechaFactura",
       "fecha_pedido",
@@ -1088,6 +1096,7 @@ function mapCuentiSaleSummary(
       "idCliente",
       "customerId",
       "id_customer",
+      "idTercero",
       "tercero_id",
       "id_tercero"
     ]),
@@ -1103,6 +1112,8 @@ function mapCuentiSaleSummary(
       "identificacion",
       "identificacion_cliente",
       "numero_identificacion",
+      "identificacionCliente",
+      "nitCliente",
       "nit",
       "documento_cliente",
       "document",
@@ -1197,6 +1208,107 @@ function dedupeAndSortCuentiSales(sales: CuentiSaleSummary[]) {
           { numeric: true }
         );
   });
+}
+
+function findCuentiTransactionId(
+  record: Record<string, unknown>,
+  source: CuentiSaleSource
+) {
+  const explicitId = findFirstTextValue(record, [
+    "id_transaccion",
+    "idTransaccion",
+    "id_transaction",
+    "id_transaccion_encabezado",
+    "idTransaccionEncabezado",
+    "id_encabezado",
+    "idEncabezado",
+    "transactionId",
+    "transaction_id",
+    "id_factura",
+    "idFactura",
+    "invoiceId",
+    "invoice_id",
+    "id_pedido",
+    "idPedido",
+    "orderId",
+    "order_id",
+    "id_venta",
+    "idVenta",
+    "saleId",
+    "referencia",
+    "ref",
+    "id"
+  ]);
+
+  if (explicitId) {
+    return explicitId;
+  }
+
+  const sourceTerms =
+    source === "order"
+      ? [
+          "transaccion",
+          "transaction",
+          "encabezado",
+          "pedido",
+          "order",
+          "venta",
+          "sale"
+        ]
+      : [
+          "transaccion",
+          "transaction",
+          "encabezado",
+          "factura",
+          "invoice",
+          "venta",
+          "sale"
+        ];
+  const excludedTerms = [
+    "cliente",
+    "customer",
+    "tercero",
+    "producto",
+    "product",
+    "sucursal",
+    "branch",
+    "empresa",
+    "company",
+    "tipo",
+    "type",
+    "vendedor",
+    "seller",
+    "empleado",
+    "employee"
+  ];
+
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = normalizeFieldKey(key);
+
+    if (
+      !normalizedKey.includes("id") ||
+      !sourceTerms.some((term) => normalizedKey.includes(term)) ||
+      excludedTerms.some((term) => normalizedKey.includes(term))
+    ) {
+      continue;
+    }
+
+    const normalizedValue = normalizeUnknownText(value);
+
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+
+  return null;
+}
+
+function normalizeFieldKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function resolveCuentiSaleHeader(value: unknown): unknown | null {
@@ -1673,19 +1785,42 @@ function getInspectableKeys(value: unknown) {
 }
 
 function inspectPrimitiveFields(value: unknown) {
-  if (!isRecord(value)) {
-    return [];
+  const fields: Array<{ key: string; value: string }> = [];
+
+  function visit(current: unknown, path: string, depth: number) {
+    if (fields.length >= 300 || depth > 7) {
+      return;
+    }
+
+    const textValue = normalizeUnknownText(current);
+
+    if (textValue) {
+      fields.push({
+        key: path || "value",
+        value: textValue.slice(0, 120)
+      });
+      return;
+    }
+
+    if (Array.isArray(current)) {
+      if (current.length > 0) {
+        visit(current[0], `${path}[0]`, depth + 1);
+      }
+      return;
+    }
+
+    if (!isRecord(current)) {
+      return;
+    }
+
+    for (const [key, nestedValue] of Object.entries(current)) {
+      visit(nestedValue, path ? `${path}.${key}` : key, depth + 1);
+    }
   }
 
-  const record = flattenRecord(value);
+  visit(value, "", 0);
 
-  return Object.entries(record)
-    .map(([key, fieldValue]) => ({
-      key,
-      value: normalizeUnknownText(fieldValue)?.slice(0, 120) ?? ""
-    }))
-    .filter((field) => field.value)
-    .slice(0, 80);
+  return fields;
 }
 
 function findFirstTextValue(record: Record<string, unknown>, keys: string[]) {

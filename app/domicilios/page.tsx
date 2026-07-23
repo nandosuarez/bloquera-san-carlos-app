@@ -865,6 +865,7 @@ function normalizeComparableText(value?: string | null) {
     ?.normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("es-CO")
+    .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
