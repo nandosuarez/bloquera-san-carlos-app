@@ -161,6 +161,30 @@ export function AdministrationAccordion({
 function CustomerSection({ customers }: { customers: CustomerView[] }) {
   return (
     <>
+      <section className="import-card">
+        <div>
+          <strong>Importar clientes</strong>
+          <p>
+            Sube un CSV con columnas Nombre, Telefono, Direccion y Nota. Si el
+            cliente ya existe, se actualizan sus datos faltantes.
+          </p>
+        </div>
+        <form
+          action="/api/admin/customers/import"
+          className="stack-form"
+          encType="multipart/form-data"
+          method="post"
+        >
+          <label className="field">
+            <span>Archivo CSV</span>
+            <input accept=".csv,text/csv" name="customersFile" required type="file" />
+          </label>
+          <button className="primary-button" type="submit">
+            Importar clientes
+          </button>
+        </form>
+      </section>
+
       <form action="/api/admin/customers" className="stack-form" method="post">
         <div className="split-fields">
           <label className="field">

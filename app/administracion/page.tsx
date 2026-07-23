@@ -15,6 +15,9 @@ const errorMessages: Record<string, string> = {
   duplicate_transport_provider: "Ese proveedor ya existe.",
   duplicate_vehicle: "Ese carro o placa ya existe.",
   duplicate_user: "Ese usuario o correo ya existe.",
+  empty_customer_import: "El archivo no tiene clientes validos.",
+  missing_customer_import_file: "Selecciona un archivo CSV de clientes.",
+  missing_customer_import_name: "El archivo debe tener una columna Nombre.",
   missing_collaborator_name: "Escribe el nombre del colaborador.",
   missing_customer_name: "Escribe el nombre del cliente.",
   missing_formula_fields: "Completa la formula del bloque.",
@@ -31,6 +34,7 @@ const errorMessages: Record<string, string> = {
 
 const successMessages: Record<string, string> = {
   collaborator_saved: "Colaborador guardado.",
+  customers_imported: "Clientes importados.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
   product_line_saved: "Linea guardada.",
@@ -44,9 +48,12 @@ const successMessages: Record<string, string> = {
 
 type AdministrationPageProps = {
   searchParams?: {
+    created?: string;
     error?: string;
     section?: string;
+    skipped?: string;
     success?: string;
+    updated?: string;
   };
 };
 
@@ -79,9 +86,12 @@ export default async function AdministrationPage({
   const errorMessage = errorCode
     ? errorMessages[errorCode] ?? "Ocurrio un error inesperado."
     : null;
-  const successMessage = successCode
-    ? successMessages[successCode] ?? null
-    : null;
+  const successMessage =
+    successCode === "customers_imported"
+      ? buildImportSuccessMessage(searchParams)
+      : successCode
+        ? successMessages[successCode] ?? null
+        : null;
 
   return (
     <AppShell
@@ -204,4 +214,12 @@ function normalizeSection(value?: string) {
   if (value === "vehicles") return "vehicles";
   if (value === "transport-providers") return "transport-providers";
   return "customers";
+}
+
+function buildImportSuccessMessage(searchParams?: AdministrationPageProps["searchParams"]) {
+  const created = Number(searchParams?.created ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const skipped = Number(searchParams?.skipped ?? 0);
+
+  return `Clientes importados. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
 }
