@@ -8,6 +8,7 @@ export type CuentiProductSyncResult = {
   created: number;
   rawRows: number;
   skipped: number;
+  stockUpdated: number;
   totalRows: number;
   updated: number;
 };
@@ -18,6 +19,7 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
   const client = await getDb().connect();
   let created = 0;
   let skipped = 0;
+  let stockUpdated = 0;
   let updated = 0;
 
   try {
@@ -45,6 +47,9 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
       if (existingByCuentiId?.rows[0]?.id) {
         await updateProduct(client, existingByCuentiId.rows[0].id, product);
         updated += 1;
+        if (product.stockQty !== null) {
+          stockUpdated += 1;
+        }
         continue;
       }
 
@@ -63,6 +68,9 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
       if (existingBySku?.rows[0]?.id) {
         await updateProduct(client, existingBySku.rows[0].id, product);
         updated += 1;
+        if (product.stockQty !== null) {
+          stockUpdated += 1;
+        }
         continue;
       }
 
@@ -72,6 +80,8 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
             name,
             sku,
             cuenti_product_id,
+            cuenti_stock_qty,
+            cuenti_stock_synced_at,
             category,
             raw_material_type,
             unit_name,
@@ -84,10 +94,32 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
             notes,
             is_active
           )
-          VALUES ($1, $2, $3, 'GENERAL', NULL, $4, $5, FALSE, 0, 0, 0, $6, $7, TRUE)
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            CASE WHEN $4::numeric IS NULL THEN NULL ELSE NOW() END,
+            'GENERAL',
+            NULL,
+            $5,
+            $6,
+            FALSE,
+            0,
+            0,
+            0,
+            $7,
+            $8,
+            TRUE
+          )
           ON CONFLICT ((LOWER(name)))
           DO UPDATE SET
             cuenti_product_id = COALESCE(EXCLUDED.cuenti_product_id, product.cuenti_product_id),
+            cuenti_stock_qty = COALESCE(EXCLUDED.cuenti_stock_qty, product.cuenti_stock_qty),
+            cuenti_stock_synced_at = CASE
+              WHEN EXCLUDED.cuenti_stock_qty IS NOT NULL THEN NOW()
+              ELSE product.cuenti_stock_synced_at
+            END,
             sku = COALESCE(EXCLUDED.sku, product.sku),
             unit_name = COALESCE(EXCLUDED.unit_name, product.unit_name),
             weight_kg = CASE
@@ -107,6 +139,7 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
           product.name,
           normalizeOptionalText(product.sku),
           normalizeOptionalText(product.cuentiProductId),
+          normalizeStock(product.stockQty),
           normalizeUnitName(product.unitName),
           normalizePositiveNumber(product.weightKg),
           normalizeMoney(product.salePrice),
@@ -118,6 +151,10 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
         created += 1;
       } else {
         updated += 1;
+      }
+
+      if (product.stockQty !== null) {
+        stockUpdated += 1;
       }
     }
 
@@ -135,6 +172,7 @@ export async function syncProductsFromCuenti(): Promise<CuentiProductSyncResult>
     created,
     rawRows: productList.rawItemsSeen,
     skipped,
+    stockUpdated,
     totalRows: cuentiProducts.length,
     updated
   };
@@ -144,6 +182,14 @@ async function ensureCuentiProductColumns(client: PoolClient) {
   await client.query(`
     ALTER TABLE product
     ADD COLUMN IF NOT EXISTS cuenti_product_id VARCHAR(80) NULL
+  `);
+  await client.query(`
+    ALTER TABLE product
+    ADD COLUMN IF NOT EXISTS cuenti_stock_qty NUMERIC(14, 2) NULL
+  `);
+  await client.query(`
+    ALTER TABLE product
+    ADD COLUMN IF NOT EXISTS cuenti_stock_synced_at TIMESTAMPTZ NULL
   `);
   await client.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS product_cuenti_product_id_unique
@@ -173,17 +219,25 @@ async function updateProduct(
           ELSE product.name
         END,
         cuenti_product_id = COALESCE($3, cuenti_product_id),
-        sku = COALESCE($4, sku),
-        unit_name = COALESCE($5, unit_name),
+        cuenti_stock_qty = CASE
+          WHEN $4::numeric IS NOT NULL THEN $4
+          ELSE cuenti_stock_qty
+        END,
+        cuenti_stock_synced_at = CASE
+          WHEN $4::numeric IS NOT NULL THEN NOW()
+          ELSE cuenti_stock_synced_at
+        END,
+        sku = COALESCE($5, sku),
+        unit_name = COALESCE($6, unit_name),
         weight_kg = CASE
-          WHEN $6 > 0 THEN $6
+          WHEN $7 > 0 THEN $7
           ELSE weight_kg
         END,
         sale_price = CASE
-          WHEN $7 > 0 THEN $7
+          WHEN $8 > 0 THEN $8
           ELSE sale_price
         END,
-        notes = COALESCE(notes, $8),
+        notes = COALESCE(notes, $9),
         is_active = TRUE,
         updated_at = NOW()
       WHERE id = $1
@@ -192,6 +246,7 @@ async function updateProduct(
       productId,
       product.name,
       normalizeOptionalText(product.cuentiProductId),
+      normalizeStock(product.stockQty),
       normalizeOptionalText(product.sku),
       normalizeUnitName(product.unitName),
       normalizePositiveNumber(product.weightKg),
@@ -230,6 +285,14 @@ function normalizePositiveNumber(value?: number | null) {
 function normalizeMoney(value?: number | null) {
   if (!Number.isFinite(value ?? Number.NaN) || (value ?? 0) <= 0) {
     return 0;
+  }
+
+  return Math.round((value ?? 0) * 100) / 100;
+}
+
+function normalizeStock(value?: number | null) {
+  if (!Number.isFinite(value ?? Number.NaN) || (value ?? 0) < 0) {
+    return null;
   }
 
   return Math.round((value ?? 0) * 100) / 100;

@@ -32,6 +32,8 @@ type ProductView = {
   blockLaborUnitCost: number;
   category: "GENERAL" | "RAW_MATERIAL" | "BLOCK";
   cuentiProductId: string | null;
+  cuentiStockQty: number | null;
+  cuentiStockSyncedAt: string | null;
   currentStockQty: number;
   dimensionLabel: string | null;
   id: string;
@@ -263,7 +265,8 @@ function CuentiSection({
           <strong>Productos de Cuenti</strong>
           <p>
             Trae los productos de Cuenti como productos generales sin inventario
-            y los conecta por ID de Cuenti, SKU o nombre.
+            y los conecta por ID de Cuenti, SKU o nombre. Si la lista trae stock,
+            tambien actualiza el stock externo.
           </p>
         </div>
         <form
@@ -277,6 +280,29 @@ function CuentiSection({
             type="submit"
           >
             Sincronizar productos
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card">
+        <div>
+          <strong>Stock de Cuenti</strong>
+          <p>
+            Actualiza el stock externo de los productos conectados con Cuenti sin
+            tocar el inventario interno de bloques e insumos.
+          </p>
+        </div>
+        <form
+          action="/api/admin/cuenti/products/stock"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            Actualizar stock Cuenti
           </button>
         </form>
       </section>
@@ -848,6 +874,7 @@ function ProductSection({
               <th>Linea</th>
               <th>Tipo insumo</th>
               <th>Stock</th>
+              <th>Stock Cuenti</th>
               <th>Peso kg</th>
               <th>Costo</th>
               <th>MO bloque</th>
@@ -873,6 +900,20 @@ function ProductSection({
                 <td>{formatRawMaterialType(product.rawMaterialType)}</td>
                 <td>
                   {formatQuantity(product.currentStockQty)} {product.unitName}
+                </td>
+                <td>
+                  {product.cuentiStockQty === null ? (
+                    "-"
+                  ) : (
+                    <>
+                      {formatQuantity(product.cuentiStockQty)} {product.unitName}
+                      {product.cuentiStockSyncedAt ? (
+                        <span className="table-meta">
+                          {formatDateTime(product.cuentiStockSyncedAt)}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </td>
                 <td>{formatQuantity(product.weightKg)}</td>
                 <td>{formatMoney(product.standardCost)}</td>

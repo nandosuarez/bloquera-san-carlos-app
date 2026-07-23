@@ -45,6 +45,7 @@ const successMessages: Record<string, string> = {
   cuenti_connected: "Conexion con Cuenti exitosa.",
   cuenti_customers_synced: "Clientes sincronizados desde Cuenti.",
   cuenti_products_synced: "Productos sincronizados desde Cuenti.",
+  cuenti_stock_synced: "Stock de Cuenti actualizado.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
   product_line_saved: "Linea guardada.",
@@ -61,11 +62,14 @@ type AdministrationPageProps = {
     branch?: string;
     branches?: string;
     catalogs?: string;
+    checked?: string;
     created?: string;
     error?: string;
+    failed?: string;
     raw?: string;
     section?: string;
     skipped?: string;
+    stock?: string;
     success?: string;
     total?: string;
     tried?: string;
@@ -113,6 +117,8 @@ export default async function AdministrationPage({
         ? buildCuentiCustomerSyncMessage(searchParams)
       : successCode === "cuenti_products_synced"
         ? buildCuentiProductSyncMessage(searchParams)
+      : successCode === "cuenti_stock_synced"
+        ? buildCuentiStockSyncMessage(searchParams)
       : successCode
         ? successMessages[successCode] ?? null
         : null;
@@ -187,6 +193,10 @@ export default async function AdministrationPage({
           blockLaborUnitCost: product.blockLaborUnitCost,
           category: product.category,
           cuentiProductId: product.cuentiProductId,
+          cuentiStockQty: product.cuentiStockQty,
+          cuentiStockSyncedAt: product.cuentiStockSyncedAt
+            ? product.cuentiStockSyncedAt.toISOString()
+            : null,
           currentStockQty: product.currentStockQty,
           dimensionLabel: product.dimensionLabel,
           id: product.id,
@@ -273,6 +283,7 @@ function buildCuentiProductSyncMessage(
   const branch = searchParams?.branch;
   const created = Number(searchParams?.created ?? 0);
   const raw = Number(searchParams?.raw ?? 0);
+  const stock = Number(searchParams?.stock ?? 0);
   const updated = Number(searchParams?.updated ?? 0);
   const skipped = Number(searchParams?.skipped ?? 0);
   const total = Number(searchParams?.total ?? created + updated + skipped);
@@ -286,7 +297,24 @@ function buildCuentiProductSyncMessage(
     return `Productos de Cuenti sincronizados. Total: 0. Cuenti devolvio ${raw} registros crudos. Sucursales probadas: ${tried || branch || "sin dato"}.`;
   }
 
-  return `Productos de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}. Sucursal usada: ${branch || "sin dato"}.`;
+  return `Productos de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}. Stock recibido: ${stock}. Sucursal usada: ${branch || "sin dato"}.`;
+}
+
+function buildCuentiStockSyncMessage(
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  const branch = searchParams?.branch;
+  const checked = Number(searchParams?.checked ?? 0);
+  const failed = Number(searchParams?.failed ?? 0);
+  const skipped = Number(searchParams?.skipped ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const tried = searchParams?.tried
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(", ");
+
+  return `Stock de Cuenti actualizado. Revisados: ${checked}. Actualizados: ${updated}. Sin stock: ${skipped}. Errores: ${failed}. Sucursal usada: ${branch || tried || "sin dato"}.`;
 }
 
 async function loadCuentiReferenceData() {

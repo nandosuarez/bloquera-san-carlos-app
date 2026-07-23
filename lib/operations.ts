@@ -51,6 +51,8 @@ type ProductRow = {
   category: ProductCategory;
   created_at: Date;
   cuenti_product_id: string | null;
+  cuenti_stock_qty: string | null;
+  cuenti_stock_synced_at: Date | null;
   current_stock_qty: string;
   dimension_label: string | null;
   id: string;
@@ -257,6 +259,8 @@ export type Product = {
   category: ProductCategory;
   createdAt: Date;
   cuentiProductId: string | null;
+  cuentiStockQty: number | null;
+  cuentiStockSyncedAt: Date | null;
   currentStockQty: number;
   dimensionLabel: string | null;
   id: string;
@@ -1733,6 +1737,8 @@ async function listProducts(): Promise<Product[]> {
         product.name,
         product.sku,
         product.cuenti_product_id,
+        product.cuenti_stock_qty,
+        product.cuenti_stock_synced_at,
         product.product_line_id,
         line.name AS product_line_name,
         product.category,
@@ -1906,6 +1912,9 @@ function mapProduct(row: ProductRow): Product {
     category: row.category,
     createdAt: row.created_at,
     cuentiProductId: row.cuenti_product_id,
+    cuentiStockQty:
+      row.cuenti_stock_qty === null ? null : Number(row.cuenti_stock_qty),
+    cuentiStockSyncedAt: row.cuenti_stock_synced_at,
     currentStockQty: Number(row.current_stock_qty),
     dimensionLabel: row.dimension_label,
     id: row.id,

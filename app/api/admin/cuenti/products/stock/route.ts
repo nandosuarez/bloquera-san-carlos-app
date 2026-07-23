@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CuentiIntegrationError } from "@/lib/cuenti";
-import { syncProductsFromCuenti } from "@/lib/cuenti-product-sync";
+import { syncCuentiProductStocks } from "@/lib/cuenti-stock-sync";
 import { requireAdminRequest } from "@/lib/permissions";
 import { redirectTo } from "@/lib/redirects";
 
@@ -16,22 +16,20 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await syncProductsFromCuenti();
+    const result = await syncCuentiProductStocks();
     const query = new URLSearchParams({
       branch: result.branchId ?? "",
-      created: String(result.created),
-      raw: String(result.rawRows),
+      checked: String(result.checked),
+      failed: String(result.failed),
       skipped: String(result.skipped),
-      stock: String(result.stockUpdated),
-      success: "cuenti_products_synced",
-      total: String(result.totalRows),
+      success: "cuenti_stock_synced",
       tried: result.branchCandidates.join(","),
       updated: String(result.updated)
     });
 
     return redirectToPage(request, query.toString());
   } catch (error) {
-    console.error("Error syncing Cuenti products", error);
+    console.error("Error syncing Cuenti product stock", error);
 
     if (error instanceof CuentiIntegrationError) {
       return redirectToPage(request, `error=${error.code}`);

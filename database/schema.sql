@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS product (
   name VARCHAR(160) NOT NULL,
   sku VARCHAR(60) NULL,
   cuenti_product_id VARCHAR(80) NULL,
+  cuenti_stock_qty NUMERIC(14, 2) NULL,
+  cuenti_stock_synced_at TIMESTAMPTZ NULL,
   product_line_id UUID NULL REFERENCES product_line(id),
   category VARCHAR(30) NOT NULL DEFAULT 'GENERAL',
   raw_material_type VARCHAR(20) NULL,
@@ -171,6 +173,7 @@ CREATE TABLE IF NOT EXISTS product (
       AND block_labor_unit_cost >= 0
       AND sale_price >= 0
       AND weight_kg >= 0
+      AND (cuenti_stock_qty IS NULL OR cuenti_stock_qty >= 0)
     )
 );
 
@@ -193,6 +196,12 @@ ADD COLUMN IF NOT EXISTS raw_material_type VARCHAR(20) NULL;
 
 ALTER TABLE product
 ADD COLUMN IF NOT EXISTS cuenti_product_id VARCHAR(80) NULL;
+
+ALTER TABLE product
+ADD COLUMN IF NOT EXISTS cuenti_stock_qty NUMERIC(14, 2) NULL;
+
+ALTER TABLE product
+ADD COLUMN IF NOT EXISTS cuenti_stock_synced_at TIMESTAMPTZ NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS product_cuenti_product_id_unique
   ON product (cuenti_product_id)
@@ -219,6 +228,7 @@ CHECK (
   AND block_labor_unit_cost >= 0
   AND sale_price >= 0
   AND weight_kg >= 0
+  AND (cuenti_stock_qty IS NULL OR cuenti_stock_qty >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS product_product_line_idx

@@ -83,6 +83,13 @@ export type CuentiProductListResult = {
   rawItemsSeen: number;
 };
 
+export type CuentiProductStockResult = {
+  branchCandidates: string[];
+  branchId: string | null;
+  rawItemsSeen: number;
+  stockQty: number | null;
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -267,10 +274,79 @@ export async function getAllCuentiProducts(): Promise<CuentiProductListResult> {
   };
 }
 
+export async function getCuentiProductStock(
+  ref: string
+): Promise<CuentiProductStockResult> {
+  const normalizedRef = normalizeOptionalText(ref);
+  const status = getCuentiConfigStatus();
+
+  if (!normalizedRef) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_product_ref",
+      "Falta la referencia del producto de Cuenti."
+    );
+  }
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const branchCandidates = await getCuentiProductBranchCandidates(
+    credentials,
+    status
+  );
+  let bestResult: CuentiProductStockBranchResult | null = null;
+
+  for (const branchId of branchCandidates) {
+    try {
+      const branchResult = await getCuentiProductStockForBranch(
+        credentials,
+        branchId,
+        normalizedRef
+      );
+
+      if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
+        bestResult = branchResult;
+      }
+
+      if (branchResult.stockQty !== null) {
+        return {
+          branchCandidates,
+          branchId,
+          rawItemsSeen: branchResult.rawItemsSeen,
+          stockQty: branchResult.stockQty
+        };
+      }
+    } catch (error) {
+      console.warn("Could not load Cuenti product stock for branch", {
+        branchId,
+        message: error instanceof Error ? error.message : "Unknown Cuenti error"
+      });
+    }
+  }
+
+  return {
+    branchCandidates,
+    branchId: bestResult?.branchId ?? null,
+    rawItemsSeen: bestResult?.rawItemsSeen ?? 0,
+    stockQty: bestResult?.stockQty ?? null
+  };
+}
+
 type CuentiProductBranchResult = {
   branchId: string;
   products: CuentiProduct[];
   rawItemsSeen: number;
+};
+
+type CuentiProductStockBranchResult = {
+  branchId: string;
+  rawItemsSeen: number;
+  stockQty: number | null;
 };
 
 async function getCuentiProductsForBranch(
@@ -351,6 +427,34 @@ async function getCuentiProductBranchCandidates(
   }
 
   return uniqueStrings(candidates);
+}
+
+async function getCuentiProductStockForBranch(
+  credentials: CuentiCredentials,
+  branchId: string,
+  ref: string
+): Promise<CuentiProductStockBranchResult> {
+  const payload = await requestCuentiData(credentials, "inventory", {
+    branchId,
+    ref
+  });
+  const items = extractResponseItems(payload);
+  const stockQty = mapCuentiStockItems(items, payload);
+
+  if (items.length > 0 && stockQty === null) {
+    console.warn("Cuenti inventory response had items but no stock value", {
+      branchId,
+      firstItemKeys: getInspectableKeys(items[0]),
+      ref,
+      rawItems: items.length
+    });
+  }
+
+  return {
+    branchId,
+    rawItemsSeen: items.length,
+    stockQty
+  };
 }
 
 function getCuentiCredentials(): CuentiCredentials {
@@ -708,6 +812,46 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     unitName,
     weightKg
   };
+}
+
+function mapCuentiStockItems(items: unknown[], payload: CuentiRawResponse) {
+  const stockValues = items
+    .map(mapCuentiStockValue)
+    .filter((value): value is number => value !== null);
+
+  if (stockValues.length > 0) {
+    return stockValues.reduce((total, value) => total + value, 0);
+  }
+
+  return mapCuentiStockValue(payload);
+}
+
+function mapCuentiStockValue(value: unknown) {
+  if (!isRecord(value)) {
+    return normalizeUnknownNumber(value);
+  }
+
+  const record = flattenRecord(value);
+
+  return findFirstNumberValue(record, [
+    "existencia",
+    "existencias",
+    "stock",
+    "stock_actual",
+    "stockActual",
+    "inventario",
+    "cantidad",
+    "quantity",
+    "qty",
+    "saldo",
+    "saldo_actual",
+    "saldoActual",
+    "disponible",
+    "cantidad_disponible",
+    "cantidadDisponible",
+    "available",
+    "availableQty"
+  ]);
 }
 
 function buildCuentiCustomerName(record: Record<string, unknown>) {
