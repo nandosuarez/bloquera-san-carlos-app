@@ -126,6 +126,17 @@ export type CuentiSalesListResult = {
   sales: CuentiSaleSummary[];
 };
 
+export type CuentiSalesDiagnostic = {
+  branchId: string;
+  endpoint: string;
+  error: string | null;
+  fields: Array<{
+    key: string;
+    value: string;
+  }>;
+  itemCount: number;
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -441,6 +452,52 @@ export async function getCuentiSales(input?: {
     rawItemsSeen: bestResult?.rawItemsSeen ?? 0,
     sales: bestResult?.sales ?? []
   };
+}
+
+export async function getCuentiSalesDiagnostics(input: {
+  dateFrom: string;
+  dateTo: string;
+}): Promise<CuentiSalesDiagnostic[]> {
+  const status = getCuentiConfigStatus();
+  const credentials = getCuentiCredentials();
+  const branchCandidates = await getCuentiProductBranchCandidates(
+    credentials,
+    status
+  );
+  const diagnostics: CuentiSalesDiagnostic[] = [];
+
+  for (const branchId of branchCandidates) {
+    for (const endpoint of ["invoices", "orders"]) {
+      try {
+        const payload = await requestCuentiData(credentials, endpoint, {
+          branchId,
+          dateFrom: normalizeDateFilter(input.dateFrom) ?? input.dateFrom,
+          dateTo: normalizeDateFilter(input.dateTo) ?? input.dateTo,
+          page: "1",
+          pageSize: "5"
+        });
+        const items = extractResponseItems(payload);
+
+        diagnostics.push({
+          branchId,
+          endpoint,
+          error: null,
+          fields: inspectPrimitiveFields(items[0]),
+          itemCount: items.length
+        });
+      } catch (error) {
+        diagnostics.push({
+          branchId,
+          endpoint,
+          error: error instanceof Error ? error.message : "Error desconocido",
+          fields: [],
+          itemCount: 0
+        });
+      }
+    }
+  }
+
+  return diagnostics;
 }
 
 export async function getCuentiSaleDetail(
@@ -1613,6 +1670,22 @@ function getInspectableKeys(value: unknown) {
   }
 
   return Object.keys(value).slice(0, 20);
+}
+
+function inspectPrimitiveFields(value: unknown) {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const record = flattenRecord(value);
+
+  return Object.entries(record)
+    .map(([key, fieldValue]) => ({
+      key,
+      value: normalizeUnknownText(fieldValue)?.slice(0, 120) ?? ""
+    }))
+    .filter((field) => field.value)
+    .slice(0, 80);
 }
 
 function findFirstTextValue(record: Record<string, unknown>, keys: string[]) {
