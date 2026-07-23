@@ -22,11 +22,8 @@ const errorMessages: Record<string, string> = {
   duplicate_user: "Ese usuario o correo ya existe.",
   cuenti_connection_failed: "Cuenti rechazo la conexion. Revisa token y empresa.",
   cuenti_unavailable: "No fue posible conectar con Cuenti.",
-  empty_customer_import: "El archivo no tiene clientes validos.",
   missing_cuenti_company: "Falta configurar el ID de empresa de Cuenti.",
   missing_cuenti_token: "Falta configurar el token API de Cuenti.",
-  missing_customer_import_file: "Selecciona un archivo CSV de clientes.",
-  missing_customer_import_name: "El archivo debe tener una columna Nombre.",
   missing_collaborator_name: "Escribe el nombre del colaborador.",
   missing_customer_name: "Escribe el nombre del cliente.",
   missing_formula_fields: "Completa la formula del bloque.",
@@ -44,7 +41,6 @@ const errorMessages: Record<string, string> = {
 
 const successMessages: Record<string, string> = {
   collaborator_saved: "Colaborador guardado.",
-  customers_imported: "Clientes importados.",
   cuenti_connected: "Conexion con Cuenti exitosa.",
   cuenti_customers_synced: "Clientes sincronizados desde Cuenti.",
   customer_saved: "Cliente guardado.",
@@ -106,10 +102,8 @@ export default async function AdministrationPage({
       ? await loadCuentiReferenceData()
       : null;
   const successMessage =
-    successCode === "customers_imported"
-      ? buildImportSuccessMessage(searchParams)
-      : successCode === "cuenti_connected"
-        ? buildCuentiSuccessMessage(searchParams)
+    successCode === "cuenti_connected"
+      ? buildCuentiSuccessMessage(searchParams)
       : successCode === "cuenti_customers_synced"
         ? buildCuentiCustomerSyncMessage(searchParams)
       : successCode
@@ -242,14 +236,6 @@ function normalizeSection(value?: string) {
   if (value === "transport-providers") return "transport-providers";
   if (value === "cuenti") return "cuenti";
   return "customers";
-}
-
-function buildImportSuccessMessage(searchParams?: AdministrationPageProps["searchParams"]) {
-  const created = Number(searchParams?.created ?? 0);
-  const updated = Number(searchParams?.updated ?? 0);
-  const skipped = Number(searchParams?.skipped ?? 0);
-
-  return `Clientes importados. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
 }
 
 function buildCuentiSuccessMessage(searchParams?: AdministrationPageProps["searchParams"]) {
