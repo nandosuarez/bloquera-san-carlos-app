@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS product (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(160) NOT NULL,
   sku VARCHAR(60) NULL,
+  cuenti_product_id VARCHAR(80) NULL,
   product_line_id UUID NULL REFERENCES product_line(id),
   category VARCHAR(30) NOT NULL DEFAULT 'GENERAL',
   raw_material_type VARCHAR(20) NULL,
@@ -189,6 +190,13 @@ EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE product
 ADD COLUMN IF NOT EXISTS raw_material_type VARCHAR(20) NULL;
+
+ALTER TABLE product
+ADD COLUMN IF NOT EXISTS cuenti_product_id VARCHAR(80) NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS product_cuenti_product_id_unique
+  ON product (cuenti_product_id)
+  WHERE cuenti_product_id IS NOT NULL AND BTRIM(cuenti_product_id) <> '';
 
 ALTER TABLE product
 ADD COLUMN IF NOT EXISTS block_labor_unit_cost NUMERIC(14, 2) NOT NULL DEFAULT 0;

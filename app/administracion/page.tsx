@@ -22,6 +22,7 @@ const errorMessages: Record<string, string> = {
   duplicate_user: "Ese usuario o correo ya existe.",
   cuenti_connection_failed: "Cuenti rechazo la conexion. Revisa token y empresa.",
   cuenti_unavailable: "No fue posible conectar con Cuenti.",
+  missing_cuenti_branch: "Falta configurar la sucursal de Cuenti.",
   missing_cuenti_company: "Falta configurar el ID de empresa de Cuenti.",
   missing_cuenti_token: "Falta configurar el token API de Cuenti.",
   missing_collaborator_name: "Escribe el nombre del colaborador.",
@@ -43,6 +44,7 @@ const successMessages: Record<string, string> = {
   collaborator_saved: "Colaborador guardado.",
   cuenti_connected: "Conexion con Cuenti exitosa.",
   cuenti_customers_synced: "Clientes sincronizados desde Cuenti.",
+  cuenti_products_synced: "Productos sincronizados desde Cuenti.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
   product_line_saved: "Linea guardada.",
@@ -106,6 +108,8 @@ export default async function AdministrationPage({
       ? buildCuentiSuccessMessage(searchParams)
       : successCode === "cuenti_customers_synced"
         ? buildCuentiCustomerSyncMessage(searchParams)
+      : successCode === "cuenti_products_synced"
+        ? buildCuentiProductSyncMessage(searchParams)
       : successCode
         ? successMessages[successCode] ?? null
         : null;
@@ -179,6 +183,7 @@ export default async function AdministrationPage({
         products={overview.products.map((product) => ({
           blockLaborUnitCost: product.blockLaborUnitCost,
           category: product.category,
+          cuentiProductId: product.cuentiProductId,
           currentStockQty: product.currentStockQty,
           dimensionLabel: product.dimensionLabel,
           id: product.id,
@@ -257,6 +262,17 @@ function buildCuentiCustomerSyncMessage(
   const total = Number(searchParams?.total ?? created + updated + skipped);
 
   return `Clientes de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
+}
+
+function buildCuentiProductSyncMessage(
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  const created = Number(searchParams?.created ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const skipped = Number(searchParams?.skipped ?? 0);
+  const total = Number(searchParams?.total ?? created + updated + skipped);
+
+  return `Productos de Cuenti sincronizados. Total: ${total}. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
 }
 
 async function loadCuentiReferenceData() {

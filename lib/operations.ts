@@ -50,6 +50,7 @@ type ProductRow = {
   block_labor_unit_cost: string;
   category: ProductCategory;
   created_at: Date;
+  cuenti_product_id: string | null;
   current_stock_qty: string;
   dimension_label: string | null;
   id: string;
@@ -255,6 +256,7 @@ export type Product = {
   blockLaborUnitCost: number;
   category: ProductCategory;
   createdAt: Date;
+  cuentiProductId: string | null;
   currentStockQty: number;
   dimensionLabel: string | null;
   id: string;
@@ -1730,6 +1732,7 @@ async function listProducts(): Promise<Product[]> {
         product.id,
         product.name,
         product.sku,
+        product.cuenti_product_id,
         product.product_line_id,
         line.name AS product_line_name,
         product.category,
@@ -1902,6 +1905,7 @@ function mapProduct(row: ProductRow): Product {
     blockLaborUnitCost: Number(row.block_labor_unit_cost),
     category: row.category,
     createdAt: row.created_at,
+    cuentiProductId: row.cuenti_product_id,
     currentStockQty: Number(row.current_stock_qty),
     dimensionLabel: row.dimension_label,
     id: row.id,

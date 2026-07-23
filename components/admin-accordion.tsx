@@ -31,6 +31,7 @@ type CollaboratorView = {
 type ProductView = {
   blockLaborUnitCost: number;
   category: "GENERAL" | "RAW_MATERIAL" | "BLOCK";
+  cuentiProductId: string | null;
   currentStockQty: number;
   dimensionLabel: string | null;
   id: string;
@@ -253,6 +254,29 @@ function CuentiSection({
             type="submit"
           >
             Sincronizar clientes
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card">
+        <div>
+          <strong>Productos de Cuenti</strong>
+          <p>
+            Trae los productos de Cuenti como productos generales sin inventario
+            y los conecta por ID de Cuenti, SKU o nombre.
+          </p>
+        </div>
+        <form
+          action="/api/admin/cuenti/products/import"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            Sincronizar productos
           </button>
         </form>
       </section>
@@ -839,6 +863,9 @@ function ProductSection({
                   {product.name}
                   {product.dimensionLabel ? (
                     <span className="table-meta">{product.dimensionLabel}</span>
+                  ) : null}
+                  {product.cuentiProductId ? (
+                    <span className="table-meta">Cuenti: {product.cuentiProductId}</span>
                   ) : null}
                 </td>
                 <td>{formatCategory(product.category)}</td>

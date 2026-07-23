@@ -56,6 +56,19 @@ export type CuentiCustomer = {
   phone: string | null;
 };
 
+export type CuentiProduct = {
+  barcode: string | null;
+  cuentiProductId: string | null;
+  name: string;
+  notes: string | null;
+  salePrice: number | null;
+  sku: string | null;
+  standardCost: number | null;
+  stockQty: number | null;
+  unitName: string | null;
+  weightKg: number | null;
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -192,6 +205,47 @@ export async function getAllCuentiCustomers(): Promise<CuentiCustomer[]> {
   }
 
   return dedupeCuentiCustomers(customers);
+}
+
+export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const products: CuentiProduct[] = [];
+  const pageSize = 100;
+  const maxPages = 100;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const payload = await requestCuentiData(credentials, "products", {
+      branchId: status.branchId,
+      page: String(page),
+      pageSize: String(pageSize)
+    });
+    const items = extractResponseItems(payload);
+
+    for (const item of items) {
+      const product = mapCuentiProduct(item);
+
+      if (product) {
+        products.push(product);
+      }
+    }
+
+    const pagination = extractPagination(payload);
+
+    if (items.length === 0) break;
+    if (pagination.totalPages && page >= pagination.totalPages) break;
+    if (!pagination.totalPages && items.length < pageSize) break;
+  }
+
+  return dedupeCuentiProducts(products);
 }
 
 function getCuentiCredentials() {
@@ -408,6 +462,107 @@ function mapCuentiCustomer(value: unknown): CuentiCustomer | null {
   };
 }
 
+function mapCuentiProduct(value: unknown): CuentiProduct | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const name = findFirstTextValue(value, [
+    "nombre_producto",
+    "nombreProducto",
+    "producto",
+    "descripcion_producto",
+    "descripcion",
+    "description",
+    "nombre",
+    "name"
+  ]);
+
+  if (!name) {
+    return null;
+  }
+
+  const cuentiProductId = findFirstTextValue(value, [
+    "id_producto",
+    "idProducto",
+    "productId",
+    "id_product",
+    "id"
+  ]);
+  const sku = findFirstTextValue(value, [
+    "sku",
+    "referencia",
+    "codigo",
+    "codigo_interno",
+    "codigoInterno",
+    "code",
+    "ref"
+  ]);
+  const barcode = findFirstTextValue(value, [
+    "codigo_barras",
+    "codigoBarras",
+    "barcode",
+    "barCode",
+    "ean"
+  ]);
+  const unitName = findFirstTextValue(value, [
+    "unidad",
+    "unit",
+    "unidad_medida",
+    "unidadMedida",
+    "unitName"
+  ]);
+  const salePrice = findFirstNumberValue(value, [
+    "precio_venta",
+    "precioVenta",
+    "salePrice",
+    "precio",
+    "precio_sucursal",
+    "precioSucursal",
+    "valor_venta",
+    "valorVenta"
+  ]);
+  const standardCost = findFirstNumberValue(value, [
+    "costo",
+    "costo_unitario",
+    "costoUnitario",
+    "standardCost",
+    "precio_compra",
+    "precioCompra",
+    "costo_promedio",
+    "costoPromedio"
+  ]);
+  const stockQty = findFirstNumberValue(value, [
+    "existencia",
+    "existencias",
+    "stock",
+    "inventario",
+    "cantidad",
+    "quantity"
+  ]);
+  const weightKg = findFirstNumberValue(value, [
+    "peso",
+    "peso_kg",
+    "pesoKg",
+    "weight",
+    "weightKg"
+  ]);
+  const notes = findFirstTextValue(value, ["nota", "notas", "notes"]);
+
+  return {
+    barcode,
+    cuentiProductId,
+    name,
+    notes,
+    salePrice,
+    sku,
+    standardCost,
+    stockQty,
+    unitName,
+    weightKg
+  };
+}
+
 function buildCuentiCustomerName(record: Record<string, unknown>) {
   const directName = findFirstTextValue(record, [
     "nombre_cliente",
@@ -524,6 +679,30 @@ function findFirstTextValue(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function findFirstNumberValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = normalizeUnknownNumber(record[key]);
+
+    if (value !== null) {
+      return value;
+    }
+
+    const caseInsensitiveKey = Object.keys(record).find(
+      (recordKey) =>
+        recordKey.toLocaleLowerCase("es-CO") === key.toLocaleLowerCase("es-CO")
+    );
+    const caseInsensitiveValue = caseInsensitiveKey
+      ? normalizeUnknownNumber(record[caseInsensitiveKey])
+      : null;
+
+    if (caseInsensitiveValue !== null) {
+      return caseInsensitiveValue;
+    }
+  }
+
+  return null;
+}
+
 function normalizeUnknownText(value: unknown) {
   if (value === null || value === undefined) {
     return null;
@@ -535,6 +714,44 @@ function normalizeUnknownText(value: unknown) {
   }
 
   return null;
+}
+
+function normalizeUnknownNumber(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .replace(/\$/g, "")
+    .replace(/\s/g, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+  const dotCount = normalized.match(/\./g)?.length ?? 0;
+  const numericText =
+    hasComma && hasDot
+      ? normalized.replace(/\./g, "").replace(",", ".")
+      : hasComma
+        ? normalized.replace(",", ".")
+        : dotCount > 1
+          ? normalized.replace(/\./g, "")
+          : normalized;
+  const parsed = Number(numericText);
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function buildReferenceDetail(
@@ -593,6 +810,22 @@ function dedupeCuentiCustomers(customers: CuentiCustomer[]) {
   return [...customersByKey.values()];
 }
 
+function dedupeCuentiProducts(products: CuentiProduct[]) {
+  const productsByKey = new Map<string, CuentiProduct>();
+
+  for (const product of products) {
+    const key =
+      product.cuentiProductId ??
+      product.sku ??
+      product.barcode ??
+      product.name.toLocaleLowerCase("es-CO");
+
+    productsByKey.set(key, mergeCuentiProduct(productsByKey.get(key), product));
+  }
+
+  return [...productsByKey.values()];
+}
+
 function mergeCuentiCustomer(
   current: CuentiCustomer | undefined,
   next: CuentiCustomer
@@ -609,6 +842,28 @@ function mergeCuentiCustomer(
     name: next.name || current.name,
     notes: next.notes ?? current.notes,
     phone: next.phone ?? current.phone
+  };
+}
+
+function mergeCuentiProduct(
+  current: CuentiProduct | undefined,
+  next: CuentiProduct
+): CuentiProduct {
+  if (!current) {
+    return next;
+  }
+
+  return {
+    barcode: next.barcode ?? current.barcode,
+    cuentiProductId: next.cuentiProductId ?? current.cuentiProductId,
+    name: next.name || current.name,
+    notes: next.notes ?? current.notes,
+    salePrice: next.salePrice ?? current.salePrice,
+    sku: next.sku ?? current.sku,
+    standardCost: next.standardCost ?? current.standardCost,
+    stockQty: next.stockQty ?? current.stockQty,
+    unitName: next.unitName ?? current.unitName,
+    weightKg: next.weightKg ?? current.weightKg
   };
 }
 
