@@ -34,6 +34,22 @@ services:
         value: admin@bloquerasancarlos.com
       - key: ADMIN_PASSWORD
         sync: false
+      - key: CUENTI_API_BASE_URL
+        value: https://integrator-apps-api-dok.cuenti.co/api
+      - key: CUENTI_COMPANY_ID
+        value: "7760"
+      - key: CUENTI_API_TOKEN
+        sync: false
+      - key: CUENTI_BRANCH_ID
+        sync: false
+      - key: CUENTI_WAREHOUSE_ID
+        sync: false
+      - key: CUENTI_SELLER_ID
+        sync: false
+      - key: CUENTI_EMPLOYEE_ID
+        sync: false
+      - key: CUENTI_CONSECUTIVE_ID
+        sync: false
 
 databases:
   - name: bloquera-san-carlos-db

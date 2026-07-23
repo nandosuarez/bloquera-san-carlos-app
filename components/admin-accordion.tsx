@@ -10,7 +10,8 @@ type SectionId =
   | "users"
   | "formulas"
   | "vehicles"
-  | "transport-providers";
+  | "transport-providers"
+  | "cuenti";
 
 type CustomerView = {
   id: string;
@@ -88,10 +89,25 @@ type TransportProviderView = {
   phone: string | null;
 };
 
+type CuentiConfigView = {
+  baseUrl: string;
+  branchId: string | null;
+  companyId: string;
+  consecutiveId: string | null;
+  employeeId: string | null;
+  hasToken: boolean;
+  isReadyForDocuments: boolean;
+  isReadyForQueries: boolean;
+  missingForDocuments: string[];
+  sellerId: string | null;
+  warehouseId: string | null;
+};
+
 type AdministrationAccordionProps = {
   blockProducts: ProductOption[];
   collaborators: CollaboratorView[];
   customers: CustomerView[];
+  cuentiConfig: CuentiConfigView;
   formulas: FormulaView[];
   products: ProductView[];
   productLines: ProductLineView[];
@@ -104,6 +120,7 @@ type AdministrationAccordionProps = {
 
 const sectionTitles: Record<SectionId, string> = {
   collaborators: "Colaboradores",
+  cuenti: "Integracion Cuenti",
   customers: "Clientes",
   formulas: "Formulas de bloques",
   "product-lines": "Lineas",
@@ -117,6 +134,7 @@ export function AdministrationAccordion({
   blockProducts,
   collaborators,
   customers,
+  cuentiConfig,
   formulas,
   products,
   productLines,
@@ -154,7 +172,110 @@ export function AdministrationAccordion({
       {section === "transport-providers" ? (
         <TransportProviderSection providers={transportProviders} />
       ) : null}
+      {section === "cuenti" ? <CuentiSection config={cuentiConfig} /> : null}
     </section>
+  );
+}
+
+function CuentiSection({ config }: { config: CuentiConfigView }) {
+  return (
+    <div className="stack-form">
+      <section className="import-card">
+        <div>
+          <strong>Conexion con Cuenti</strong>
+          <p>
+            La empresa quedo preconfigurada con ID 7760. El token se maneja como
+            variable de entorno para no exponerlo en la pantalla ni en Git.
+          </p>
+        </div>
+        <form action="/api/admin/cuenti/test" className="stack-form" method="post">
+          <button className="primary-button" type="submit">
+            Probar conexion
+          </button>
+        </form>
+      </section>
+
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Dato</th>
+              <th>Valor</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <CuentiConfigRow label="Servidor" status="Listo" value={config.baseUrl} />
+            <CuentiConfigRow label="Empresa" status="Listo" value={config.companyId} />
+            <CuentiConfigRow
+              label="Token API"
+              status={config.hasToken ? "Configurado" : "Pendiente"}
+              value={config.hasToken ? "Protegido" : "CUENTI_API_TOKEN"}
+            />
+            <CuentiConfigRow
+              label="Sucursal"
+              status={config.branchId ? "Configurado" : "Pendiente"}
+              value={config.branchId ?? "CUENTI_BRANCH_ID"}
+            />
+            <CuentiConfigRow
+              label="Bodega"
+              status={config.warehouseId ? "Configurado" : "Pendiente"}
+              value={config.warehouseId ?? "CUENTI_WAREHOUSE_ID"}
+            />
+            <CuentiConfigRow
+              label="Vendedor"
+              status={config.sellerId ? "Configurado" : "Pendiente"}
+              value={config.sellerId ?? "CUENTI_SELLER_ID"}
+            />
+            <CuentiConfigRow
+              label="Empleado"
+              status={config.employeeId ? "Configurado" : "Pendiente"}
+              value={config.employeeId ?? "CUENTI_EMPLOYEE_ID"}
+            />
+            <CuentiConfigRow
+              label="Consecutivo"
+              status={config.consecutiveId ? "Configurado" : "Pendiente"}
+              value={config.consecutiveId ?? "CUENTI_CONSECUTIVE_ID"}
+            />
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        className={`message ${
+          config.isReadyForDocuments ? "message-success" : "message-error"
+        }`}
+      >
+        {config.isReadyForQueries
+          ? "La app ya queda lista para consultas cuando la prueba de conexion responda correctamente."
+          : "Falta configurar el token API de Cuenti para poder consultar datos."}
+        {!config.isReadyForDocuments && config.missingForDocuments.length > 0
+          ? ` Para crear documentos faltan: ${config.missingForDocuments.join(", ")}.`
+          : ""}
+      </div>
+    </div>
+  );
+}
+
+function CuentiConfigRow({
+  label,
+  status,
+  value
+}: {
+  label: string;
+  status: string;
+  value: string;
+}) {
+  return (
+    <tr>
+      <td>{label}</td>
+      <td>{value}</td>
+      <td>
+        <span className={status === "Pendiente" ? "status-chip status-chip-muted" : "status-chip"}>
+          {status}
+        </span>
+      </td>
+    </tr>
   );
 }
 

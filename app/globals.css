@@ -586,6 +586,11 @@ textarea {
   border-color: rgba(255, 214, 70, 0.24);
 }
 
+.status-chip-muted {
+  background: rgba(23, 33, 38, 0.08);
+  color: var(--ink-soft);
+}
+
 .workspace-main {
   min-width: 0;
   display: flex;

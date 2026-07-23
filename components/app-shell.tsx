@@ -290,6 +290,14 @@ export function AppShell({
                     >
                       Proveedores
                     </Link>
+                    <Link
+                      className={`sidebar-subnav-link ${
+                        adminSection === "cuenti" ? "sidebar-subnav-link-active" : ""
+                      }`}
+                      href="/administracion?section=cuenti"
+                    >
+                      Cuenti
+                    </Link>
                   </div>
                 ) : null}
               </div>
@@ -323,6 +331,7 @@ function normalizeAdminSection(value: string | null) {
   if (value === "formulas") return "formulas";
   if (value === "vehicles") return "vehicles";
   if (value === "transport-providers") return "transport-providers";
+  if (value === "cuenti") return "cuenti";
   return "customers";
 }
 

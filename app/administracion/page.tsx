@@ -1,5 +1,6 @@
 import { AdministrationAccordion } from "@/components/admin-accordion";
 import { AppShell } from "@/components/app-shell";
+import { getCuentiConfigStatus } from "@/lib/cuenti";
 import { getAdminOverview } from "@/lib/operations";
 import { requireAdminPage } from "@/lib/permissions";
 import { listTransportProviders } from "@/lib/transport-providers";
@@ -15,7 +16,11 @@ const errorMessages: Record<string, string> = {
   duplicate_transport_provider: "Ese proveedor ya existe.",
   duplicate_vehicle: "Ese carro o placa ya existe.",
   duplicate_user: "Ese usuario o correo ya existe.",
+  cuenti_connection_failed: "Cuenti rechazo la conexion. Revisa token y empresa.",
+  cuenti_unavailable: "No fue posible conectar con Cuenti.",
   empty_customer_import: "El archivo no tiene clientes validos.",
+  missing_cuenti_company: "Falta configurar el ID de empresa de Cuenti.",
+  missing_cuenti_token: "Falta configurar el token API de Cuenti.",
   missing_customer_import_file: "Selecciona un archivo CSV de clientes.",
   missing_customer_import_name: "El archivo debe tener una columna Nombre.",
   missing_collaborator_name: "Escribe el nombre del colaborador.",
@@ -35,6 +40,7 @@ const errorMessages: Record<string, string> = {
 const successMessages: Record<string, string> = {
   collaborator_saved: "Colaborador guardado.",
   customers_imported: "Clientes importados.",
+  cuenti_connected: "Conexion con Cuenti exitosa.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
   product_line_saved: "Linea guardada.",
@@ -48,6 +54,7 @@ const successMessages: Record<string, string> = {
 
 type AdministrationPageProps = {
   searchParams?: {
+    branches?: string;
     created?: string;
     error?: string;
     section?: string;
@@ -89,6 +96,8 @@ export default async function AdministrationPage({
   const successMessage =
     successCode === "customers_imported"
       ? buildImportSuccessMessage(searchParams)
+      : successCode === "cuenti_connected"
+        ? buildCuentiSuccessMessage(searchParams)
       : successCode
         ? successMessages[successCode] ?? null
         : null;
@@ -146,6 +155,7 @@ export default async function AdministrationPage({
           name: customer.name,
           phone: customer.phone
         }))}
+        cuentiConfig={getCuentiConfigStatus()}
         formulas={overview.formulas.map((formula) => ({
           blockName: formula.blockName,
           cementBagsQty: formula.cementBagsQty,
@@ -213,6 +223,7 @@ function normalizeSection(value?: string) {
   if (value === "formulas") return "formulas";
   if (value === "vehicles") return "vehicles";
   if (value === "transport-providers") return "transport-providers";
+  if (value === "cuenti") return "cuenti";
   return "customers";
 }
 
@@ -222,4 +233,14 @@ function buildImportSuccessMessage(searchParams?: AdministrationPageProps["searc
   const skipped = Number(searchParams?.skipped ?? 0);
 
   return `Clientes importados. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
+}
+
+function buildCuentiSuccessMessage(searchParams?: AdministrationPageProps["searchParams"]) {
+  const branches = searchParams?.branches;
+
+  if (!branches) {
+    return "Conexion con Cuenti exitosa.";
+  }
+
+  return `Conexion con Cuenti exitosa. Sucursales encontradas: ${branches}.`;
 }
