@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CustomerSearchSelect } from "@/components/customer-search-select";
+import { ProductSearchSelect } from "@/components/product-search-select";
 import type {
   DeliveryCollaboratorOption,
   DeliveryCustomerOption,
@@ -191,22 +192,15 @@ export function DeliveryServiceForm({
       <div className="stack-form">
         {productRows.map((row, index) => (
           <div className="delivery-product-row" key={row.id}>
-            <label className="field">
-              <span>Producto {index + 1}</span>
-              <select
-                disabled={products.length === 0}
-                name="productId"
-                onChange={(event) => updateProductRow(row.id, "productId", event.target.value)}
-                value={row.productId}
-              >
-                <option value="">Seleccionar</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ProductSearchSelect
+              disabled={products.length === 0}
+              label={`Producto ${index + 1}`}
+              onChange={(productId) =>
+                updateProductRow(row.id, "productId", productId)
+              }
+              products={products}
+              value={row.productId}
+            />
 
             <div className="split-fields three-fields">
               <label className="field">
