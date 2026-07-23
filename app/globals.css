@@ -1053,6 +1053,68 @@ textarea {
   color: var(--ink-soft);
 }
 
+.cuenti-reference-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.cuenti-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.cuenti-catalog-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.cuenti-catalog-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.cuenti-id-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.cuenti-id-row {
+  display: grid;
+  grid-template-columns: minmax(58px, max-content) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  border-radius: 12px;
+  padding: 0.65rem;
+  background: rgba(247, 197, 30, 0.12);
+}
+
+.cuenti-id-row code {
+  border-radius: 999px;
+  padding: 0.22rem 0.5rem;
+  background: rgba(177, 17, 27, 0.1);
+  color: var(--accent-deep);
+  font-weight: 800;
+}
+
+.cuenti-id-row strong,
+.cuenti-id-row small {
+  display: block;
+}
+
+.cuenti-id-row small {
+  margin-top: 0.18rem;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+
 .delivery-product-row {
   display: grid;
   gap: 0.65rem;

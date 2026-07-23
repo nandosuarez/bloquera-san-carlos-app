@@ -1,6 +1,10 @@
 import { AdministrationAccordion } from "@/components/admin-accordion";
 import { AppShell } from "@/components/app-shell";
-import { getCuentiConfigStatus } from "@/lib/cuenti";
+import {
+  CuentiIntegrationError,
+  getCuentiConfigStatus,
+  getCuentiReferenceData
+} from "@/lib/cuenti";
 import { getAdminOverview } from "@/lib/operations";
 import { requireAdminPage } from "@/lib/permissions";
 import { listTransportProviders } from "@/lib/transport-providers";
@@ -34,6 +38,7 @@ const errorMessages: Record<string, string> = {
   missing_user_fields: "Completa los datos del usuario.",
   product_line_not_found: "Selecciona una linea valida.",
   product_not_found: "No se encontro el producto.",
+  reference_error: "No fue posible consultar las referencias de Cuenti.",
   server_error: "No fue posible guardar el registro."
 };
 
@@ -55,6 +60,7 @@ const successMessages: Record<string, string> = {
 type AdministrationPageProps = {
   searchParams?: {
     branches?: string;
+    catalogs?: string;
     created?: string;
     error?: string;
     section?: string;
@@ -93,6 +99,10 @@ export default async function AdministrationPage({
   const errorMessage = errorCode
     ? errorMessages[errorCode] ?? "Ocurrio un error inesperado."
     : null;
+  const cuentiReferenceData =
+    selectedSection === "cuenti" && searchParams?.catalogs === "1"
+      ? await loadCuentiReferenceData()
+      : null;
   const successMessage =
     successCode === "customers_imported"
       ? buildImportSuccessMessage(searchParams)
@@ -156,6 +166,7 @@ export default async function AdministrationPage({
           phone: customer.phone
         }))}
         cuentiConfig={getCuentiConfigStatus()}
+        cuentiReferenceData={cuentiReferenceData}
         formulas={overview.formulas.map((formula) => ({
           blockName: formula.blockName,
           cementBagsQty: formula.cementBagsQty,
@@ -243,4 +254,32 @@ function buildCuentiSuccessMessage(searchParams?: AdministrationPageProps["searc
   }
 
   return `Conexion con Cuenti exitosa. Sucursales encontradas: ${branches}.`;
+}
+
+async function loadCuentiReferenceData() {
+  try {
+    return await getCuentiReferenceData();
+  } catch (error) {
+    console.error("Error loading Cuenti references", error);
+
+    const message =
+      error instanceof CuentiIntegrationError
+        ? error.message
+        : "No fue posible consultar las referencias de Cuenti.";
+
+    return {
+      banks: [],
+      branches: [],
+      consecutives: [],
+      employees: [],
+      errors: [
+        {
+          label: "Referencias",
+          message
+        }
+      ],
+      loadedAt: new Date().toISOString(),
+      paymentMethods: []
+    };
+  }
 }

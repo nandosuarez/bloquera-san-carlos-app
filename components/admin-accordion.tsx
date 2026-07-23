@@ -103,11 +103,31 @@ type CuentiConfigView = {
   warehouseId: string | null;
 };
 
+type CuentiReferenceItemView = {
+  detail: string | null;
+  id: string;
+  name: string;
+};
+
+type CuentiReferenceDataView = {
+  banks: CuentiReferenceItemView[];
+  branches: CuentiReferenceItemView[];
+  consecutives: CuentiReferenceItemView[];
+  employees: CuentiReferenceItemView[];
+  errors: Array<{
+    label: string;
+    message: string;
+  }>;
+  loadedAt: string;
+  paymentMethods: CuentiReferenceItemView[];
+};
+
 type AdministrationAccordionProps = {
   blockProducts: ProductOption[];
   collaborators: CollaboratorView[];
   customers: CustomerView[];
   cuentiConfig: CuentiConfigView;
+  cuentiReferenceData: CuentiReferenceDataView | null;
   formulas: FormulaView[];
   products: ProductView[];
   productLines: ProductLineView[];
@@ -135,6 +155,7 @@ export function AdministrationAccordion({
   collaborators,
   customers,
   cuentiConfig,
+  cuentiReferenceData,
   formulas,
   products,
   productLines,
@@ -172,12 +193,20 @@ export function AdministrationAccordion({
       {section === "transport-providers" ? (
         <TransportProviderSection providers={transportProviders} />
       ) : null}
-      {section === "cuenti" ? <CuentiSection config={cuentiConfig} /> : null}
+      {section === "cuenti" ? (
+        <CuentiSection config={cuentiConfig} referenceData={cuentiReferenceData} />
+      ) : null}
     </section>
   );
 }
 
-function CuentiSection({ config }: { config: CuentiConfigView }) {
+function CuentiSection({
+  config,
+  referenceData
+}: {
+  config: CuentiConfigView;
+  referenceData: CuentiReferenceDataView | null;
+}) {
   return (
     <div className="stack-form">
       <section className="import-card">
@@ -194,6 +223,14 @@ function CuentiSection({ config }: { config: CuentiConfigView }) {
           </button>
         </form>
       </section>
+
+      <form action="/administracion" className="form-actions" method="get">
+        <input name="section" type="hidden" value="cuenti" />
+        <input name="catalogs" type="hidden" value="1" />
+        <button className="ghost-button" disabled={!config.isReadyForQueries} type="submit">
+          Consultar IDs en Cuenti
+        </button>
+      </form>
 
       <div className="table-wrap">
         <table className="data-table">
@@ -253,6 +290,64 @@ function CuentiSection({ config }: { config: CuentiConfigView }) {
           ? ` Para crear documentos faltan: ${config.missingForDocuments.join(", ")}.`
           : ""}
       </div>
+
+      {referenceData ? (
+        <section className="cuenti-reference-panel">
+          <div className="panel-headline">
+            <strong>IDs encontrados en Cuenti</strong>
+            <span className="table-muted">
+              Consulta: {formatDateTime(referenceData.loadedAt)}
+            </span>
+          </div>
+
+          {referenceData.errors.length > 0 ? (
+            <div className="message message-error">
+              {referenceData.errors
+                .map((error) => `${error.label}: ${error.message}`)
+                .join(" ")}
+            </div>
+          ) : null}
+
+          <div className="cuenti-reference-grid">
+            <CuentiCatalogCard
+              envKey="CUENTI_BRANCH_ID"
+              items={referenceData.branches}
+              title="Sucursales"
+            />
+            <CuentiCatalogCard
+              envKey="CUENTI_EMPLOYEE_ID / CUENTI_SELLER_ID"
+              items={referenceData.employees}
+              title="Empleados y vendedores"
+            />
+            <CuentiCatalogCard
+              envKey="CUENTI_CONSECUTIVE_ID"
+              items={referenceData.consecutives}
+              title="Consecutivos"
+            />
+            <CuentiCatalogCard
+              envKey="Referencia futura"
+              items={referenceData.paymentMethods}
+              title="Medios de pago"
+            />
+            <CuentiCatalogCard
+              envKey="Referencia futura"
+              items={referenceData.banks}
+              title="Bancos"
+            />
+            <article className="cuenti-catalog-card">
+              <div className="entity-card-head">
+                <strong>Bodega</strong>
+                <span className="status-chip status-chip-muted">Manual</span>
+              </div>
+              <p>
+                El Swagger de Cuenti no muestra un endpoint para listar bodegas.
+                Este valor se debe confirmar en Cuenti y configurarlo en Render
+                como CUENTI_WAREHOUSE_ID.
+              </p>
+            </article>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -277,6 +372,54 @@ function CuentiConfigRow({
       </td>
     </tr>
   );
+}
+
+function CuentiCatalogCard({
+  envKey,
+  items,
+  title
+}: {
+  envKey: string;
+  items: CuentiReferenceItemView[];
+  title: string;
+}) {
+  return (
+    <article className="cuenti-catalog-card">
+      <div className="entity-card-head">
+        <strong>{title}</strong>
+        <span className="status-chip">{items.length}</span>
+      </div>
+      <span className="table-muted">{envKey}</span>
+
+      {items.length === 0 ? (
+        <p>No se encontraron registros.</p>
+      ) : (
+        <div className="cuenti-id-list">
+          {items.slice(0, 18).map((item) => (
+            <div className="cuenti-id-row" key={`${title}-${item.id}-${item.name}`}>
+              <code>{item.id}</code>
+              <div>
+                <strong>{item.name}</strong>
+                {item.detail ? <small>{item.detail}</small> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {items.length > 18 ? (
+        <span className="table-muted">Mostrando 18 de {items.length} registros.</span>
+      ) : null}
+    </article>
+  );
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("es-CO", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Bogota"
+  }).format(new Date(value));
 }
 
 function CustomerSection({ customers }: { customers: CustomerView[] }) {
