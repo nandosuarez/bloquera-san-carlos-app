@@ -470,6 +470,7 @@ export async function getCuentiSaleDetail(
     status
   );
   let bestResult: CuentiSaleDetailBranchResult | null = null;
+  let bestScore = -1;
   let lastError: unknown = null;
 
   for (const branchId of branchCandidates) {
@@ -480,12 +481,17 @@ export async function getCuentiSaleDetail(
         normalizedRef,
         source
       );
+      const branchScore = scoreCuentiSaleDetail(branchResult.sale);
 
-      if (!bestResult || branchResult.rawItemsSeen > bestResult.rawItemsSeen) {
+      if (!bestResult || branchScore > bestScore) {
         bestResult = branchResult;
+        bestScore = branchScore;
       }
 
-      if (branchResult.sale) {
+      if (
+        branchResult.sale?.customerName &&
+        branchResult.sale.items.length > 0
+      ) {
         return branchResult.sale;
       }
     } catch (error) {
@@ -503,6 +509,20 @@ export async function getCuentiSaleDetail(
   }
 
   return bestResult?.sale ?? null;
+}
+
+function scoreCuentiSaleDetail(sale: CuentiSaleDetail | null) {
+  if (!sale) {
+    return -1;
+  }
+
+  return (
+    (sale.customerName ? 20 : 0) +
+    (sale.customerIdentification ? 8 : 0) +
+    (sale.documentNumber ? 8 : 0) +
+    (sale.saleDate ? 4 : 0) +
+    sale.items.length * 2
+  );
 }
 
 type CuentiProductBranchResult = {
