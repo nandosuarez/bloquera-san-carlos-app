@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
+import { CustomerSearchSelect } from "@/components/customer-search-select";
 import {
   getPendingDeliveryOverview,
   type PendingDeliveryAccount,
@@ -113,17 +114,12 @@ export default async function PendingDeliveryPage({
 
         <form className="stack-form" method="get">
           <div className="split-fields three-fields">
-            <label className="field">
-              <span>Cliente</span>
-              <select defaultValue={filters.customerId ?? ""} name="customerId">
-                <option value="">Todos</option>
-                {overview.customerOptions.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CustomerSearchSelect
+              customers={overview.customerOptions}
+              defaultValue={filters.customerId}
+              helperText="Dejalo vacio para consultar todos los clientes."
+              placeholder="Todos los clientes"
+            />
 
             <label className="field">
               <span>Producto</span>
@@ -173,22 +169,11 @@ export default async function PendingDeliveryPage({
 
           <form action="/api/pending-deliveries/purchases" className="stack-form" method="post">
             <div className="split-fields">
-              <label className="field">
-                <span>Cliente</span>
-                <select
-                  defaultValue=""
-                  disabled={overview.customerOptions.length === 0}
-                  name="customerId"
-                  required
-                >
-                  <option value="">Seleccionar</option>
-                  {overview.customerOptions.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <CustomerSearchSelect
+                customers={overview.customerOptions}
+                disabled={overview.customerOptions.length === 0}
+                required
+              />
 
               <label className="field">
                 <span>Producto</span>

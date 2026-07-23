@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CustomerSearchSelect } from "@/components/customer-search-select";
 import type {
   DeliveryCollaboratorOption,
   DeliveryCustomerOption,
@@ -102,23 +103,13 @@ export function DeliveryServiceForm({
       </div>
 
       <div className="split-fields">
-        <label className="field">
-          <span>Cliente</span>
-          <select
-            disabled={customers.length === 0}
-            name="customerId"
-            onChange={(event) => setCustomerId(event.target.value)}
-            required
-            value={customerId}
-          >
-            <option value="">Seleccionar</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CustomerSearchSelect
+          customers={customers}
+          disabled={customers.length === 0}
+          onChange={setCustomerId}
+          required
+          value={customerId}
+        />
         <label className="field">
           <span>Telefono</span>
           <input

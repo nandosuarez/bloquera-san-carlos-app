@@ -281,6 +281,91 @@ textarea {
   resize: vertical;
 }
 
+.search-select {
+  position: relative;
+}
+
+.search-select-control {
+  position: relative;
+}
+
+.search-select-control input {
+  padding-right: 5.4rem;
+}
+
+.search-select-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  min-height: 34px;
+  border: none;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(247, 197, 30, 0.22);
+  color: var(--accent-deep);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.search-select-results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  display: grid;
+  max-height: 285px;
+  overflow-y: auto;
+  border: 1px solid rgba(177, 17, 27, 0.16);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 250, 239, 0.98);
+  box-shadow: 0 18px 34px rgba(76, 6, 12, 0.16);
+  padding: 0.35rem;
+}
+
+.search-select-option {
+  display: grid;
+  gap: 0.12rem;
+  border: none;
+  border-radius: 10px;
+  padding: 0.68rem 0.75rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-select-option:hover,
+.search-select-option:focus {
+  outline: none;
+  background: rgba(247, 197, 30, 0.2);
+}
+
+.search-select-option span,
+.search-select-option small,
+.search-select-help,
+.search-select-selected {
+  color: var(--ink-soft);
+}
+
+.search-select-option span,
+.search-select-option small {
+  font-size: 0.82rem;
+}
+
+.search-select-empty {
+  padding: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.search-select-help,
+.search-select-selected {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .primary-button,
 .ghost-button {
   display: inline-flex;
@@ -946,6 +1031,23 @@ textarea {
   line-height: 1.45;
 }
 
+.customer-list-tools {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) max-content;
+  gap: 1rem;
+  align-items: end;
+}
+
+.customer-list-count {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.9rem;
+  background: rgba(247, 197, 30, 0.13);
+  color: var(--ink-soft);
+}
+
 .delivery-product-row {
   display: grid;
   gap: 0.65rem;
@@ -1465,6 +1567,11 @@ textarea {
 
   .import-card {
     grid-template-columns: 1fr;
+  }
+
+  .customer-list-tools {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .delivery-product-row {

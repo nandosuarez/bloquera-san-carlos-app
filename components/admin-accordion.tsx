@@ -159,6 +159,9 @@ export function AdministrationAccordion({
 }
 
 function CustomerSection({ customers }: { customers: CustomerView[] }) {
+  const [customerSearch, setCustomerSearch] = useState("");
+  const filteredCustomers = filterCustomers(customers, customerSearch);
+
   return (
     <>
       <section className="import-card">
@@ -209,6 +212,22 @@ function CustomerSection({ customers }: { customers: CustomerView[] }) {
         </button>
       </form>
 
+      <div className="customer-list-tools">
+        <label className="field">
+          <span>Buscar cliente</span>
+          <input
+            onChange={(event) => setCustomerSearch(event.target.value)}
+            placeholder="Nombre o telefono"
+            type="search"
+            value={customerSearch}
+          />
+        </label>
+        <div className="customer-list-count">
+          Mostrando <strong>{filteredCustomers.length}</strong> de{" "}
+          <strong>{customers.length}</strong>
+        </div>
+      </div>
+
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -218,17 +237,45 @@ function CustomerSection({ customers }: { customers: CustomerView[] }) {
             </tr>
           </thead>
           <tbody>
-            {customers.map((customer) => (
-              <tr key={customer.id}>
-                <td>{customer.name}</td>
-                <td>{customer.phone ?? "-"}</td>
+            {filteredCustomers.length === 0 ? (
+              <tr>
+                <td colSpan={2}>No encontre clientes con esa busqueda.</td>
               </tr>
-            ))}
+            ) : (
+              filteredCustomers.map((customer) => (
+                <tr key={customer.id}>
+                  <td>{customer.name}</td>
+                  <td>{customer.phone ?? "-"}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
     </>
   );
+}
+
+function filterCustomers(customers: CustomerView[], query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return customers;
+  }
+
+  return customers.filter((customer) =>
+    normalizeSearchText(`${customer.name} ${customer.phone ?? ""}`).includes(
+      normalizedQuery
+    )
+  );
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .trim();
 }
 
 function CollaboratorSection({ collaborators }: { collaborators: CollaboratorView[] }) {
