@@ -5,6 +5,7 @@ const DEFAULT_CUENTI_COMPANY_ID = "7760";
 type CuentiRawResponse = {
   data?: unknown;
   message?: string;
+  msg?: string;
   success?: boolean;
 };
 
@@ -219,30 +220,47 @@ export async function getAllCuentiProducts(): Promise<CuentiProduct[]> {
 
   const credentials = getCuentiCredentials();
   const products: CuentiProduct[] = [];
-  const pageSize = 100;
+  const defaultProductPageSize = 20;
   const maxPages = 100;
+  let rawItemsSeen = 0;
 
   for (let page = 1; page <= maxPages; page += 1) {
     const payload = await requestCuentiData(credentials, "products", {
       branchId: status.branchId,
-      page: String(page),
-      pageSize: String(pageSize)
+      page: String(page)
     });
     const items = extractResponseItems(payload);
+    let mappedOnPage = 0;
+    rawItemsSeen += items.length;
 
     for (const item of items) {
       const product = mapCuentiProduct(item);
 
       if (product) {
         products.push(product);
+        mappedOnPage += 1;
       }
+    }
+
+    if (items.length > 0 && mappedOnPage === 0) {
+      console.warn("Cuenti products page had items but none could be mapped", {
+        firstItemKeys: getInspectableKeys(items[0]),
+        page,
+        rawItems: items.length
+      });
     }
 
     const pagination = extractPagination(payload);
 
     if (items.length === 0) break;
     if (pagination.totalPages && page >= pagination.totalPages) break;
-    if (!pagination.totalPages && items.length < pageSize) break;
+    if (!pagination.totalPages && items.length < defaultProductPageSize) break;
+  }
+
+  if (rawItemsSeen > 0 && products.length === 0) {
+    console.warn("Cuenti products response had raw items but no usable products", {
+      rawItemsSeen
+    });
   }
 
   return dedupeCuentiProducts(products);
@@ -352,8 +370,15 @@ function buildApiErrorMessage(response: Response, payload: CuentiRawResponse) {
 }
 
 function getResponseMessage(payload: CuentiRawResponse) {
-  return typeof payload.message === "string" && payload.message.trim()
-    ? payload.message.trim()
+  const message =
+    typeof payload.message === "string" && payload.message.trim()
+      ? payload.message.trim()
+      : typeof payload.msg === "string" && payload.msg.trim()
+        ? payload.msg.trim()
+        : null;
+
+  return message
+    ? message
     : null;
 }
 
@@ -364,21 +389,62 @@ function extractCatalogItems(payload: CuentiRawResponse, endpoint: string) {
 }
 
 function extractResponseItems(payload: CuentiRawResponse) {
-  const data = payload.data;
+  return extractItemsFromUnknown(payload) ?? [];
+}
 
-  if (Array.isArray(data)) {
-    return data;
+function extractItemsFromUnknown(value: unknown, depth = 0): unknown[] | null {
+  if (Array.isArray(value)) {
+    return value;
   }
 
-  if (isRecord(data) && Array.isArray(data.items)) {
-    return data.items;
+  if (!isRecord(value) || depth > 4) {
+    return null;
   }
 
-  if (isRecord(data)) {
-    return [data];
+  const dataValue = getCaseInsensitiveValue(value, "data");
+
+  if (dataValue !== undefined) {
+    const dataItems = extractItemsFromUnknown(dataValue, depth + 1);
+
+    if (dataItems !== null) {
+      return dataItems;
+    }
+
+    if (isRecord(dataValue)) {
+      return [dataValue];
+    }
   }
 
-  return [];
+  const listKeys = [
+    "items",
+    "rows",
+    "records",
+    "results",
+    "result",
+    "productos",
+    "products",
+    "lista",
+    "list",
+    "content"
+  ];
+
+  for (const key of listKeys) {
+    const nestedValue = getCaseInsensitiveValue(value, key);
+
+    if (nestedValue === undefined) {
+      continue;
+    }
+
+    const nestedItems = extractItemsFromUnknown(nestedValue, depth + 1);
+
+    if (nestedItems !== null) {
+      return nestedItems;
+    }
+  }
+
+  const firstArray = Object.values(value).find((entry) => Array.isArray(entry));
+
+  return Array.isArray(firstArray) ? firstArray : null;
 }
 
 function mapReferenceItem(
@@ -467,7 +533,8 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     return null;
   }
 
-  const name = findFirstTextValue(value, [
+  const record = flattenRecord(value);
+  const name = findFirstTextValue(record, [
     "nombre_producto",
     "nombreProducto",
     "producto",
@@ -482,14 +549,14 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     return null;
   }
 
-  const cuentiProductId = findFirstTextValue(value, [
+  const cuentiProductId = findFirstTextValue(record, [
     "id_producto",
     "idProducto",
     "productId",
     "id_product",
     "id"
   ]);
-  const sku = findFirstTextValue(value, [
+  const sku = findFirstTextValue(record, [
     "sku",
     "referencia",
     "codigo",
@@ -498,21 +565,21 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     "code",
     "ref"
   ]);
-  const barcode = findFirstTextValue(value, [
+  const barcode = findFirstTextValue(record, [
     "codigo_barras",
     "codigoBarras",
     "barcode",
     "barCode",
     "ean"
   ]);
-  const unitName = findFirstTextValue(value, [
+  const unitName = findFirstTextValue(record, [
     "unidad",
     "unit",
     "unidad_medida",
     "unidadMedida",
     "unitName"
   ]);
-  const salePrice = findFirstNumberValue(value, [
+  const salePrice = findFirstNumberValue(record, [
     "precio_venta",
     "precioVenta",
     "salePrice",
@@ -522,7 +589,7 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     "valor_venta",
     "valorVenta"
   ]);
-  const standardCost = findFirstNumberValue(value, [
+  const standardCost = findFirstNumberValue(record, [
     "costo",
     "costo_unitario",
     "costoUnitario",
@@ -532,7 +599,7 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     "costo_promedio",
     "costoPromedio"
   ]);
-  const stockQty = findFirstNumberValue(value, [
+  const stockQty = findFirstNumberValue(record, [
     "existencia",
     "existencias",
     "stock",
@@ -540,14 +607,14 @@ function mapCuentiProduct(value: unknown): CuentiProduct | null {
     "cantidad",
     "quantity"
   ]);
-  const weightKg = findFirstNumberValue(value, [
+  const weightKg = findFirstNumberValue(record, [
     "peso",
     "peso_kg",
     "pesoKg",
     "weight",
     "weightKg"
   ]);
-  const notes = findFirstTextValue(value, ["nota", "notas", "notes"]);
+  const notes = findFirstTextValue(record, ["nota", "notas", "notes"]);
 
   return {
     barcode,
@@ -653,6 +720,51 @@ function buildNameKeys(endpoint: string) {
   }
 
   return baseKeys;
+}
+
+function getCaseInsensitiveValue(record: Record<string, unknown>, key: string) {
+  if (key in record) {
+    return record[key];
+  }
+
+  const caseInsensitiveKey = Object.keys(record).find(
+    (recordKey) =>
+      recordKey.toLocaleLowerCase("es-CO") === key.toLocaleLowerCase("es-CO")
+  );
+
+  return caseInsensitiveKey ? record[caseInsensitiveKey] : undefined;
+}
+
+function flattenRecord(record: Record<string, unknown>, depth = 0) {
+  const flattened: Record<string, unknown> = { ...record };
+
+  if (depth >= 2) {
+    return flattened;
+  }
+
+  for (const value of Object.values(record)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+
+    const nested = flattenRecord(value, depth + 1);
+
+    for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+      if (!(nestedKey in flattened)) {
+        flattened[nestedKey] = nestedValue;
+      }
+    }
+  }
+
+  return flattened;
+}
+
+function getInspectableKeys(value: unknown) {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.keys(value).slice(0, 20);
 }
 
 function findFirstTextValue(record: Record<string, unknown>, keys: string[]) {
