@@ -1522,6 +1522,15 @@ function mapCuentiInvoiceSyncDetail(
   const headerRecord = isRecord(headerSource)
     ? flattenRecord(headerSource)
     : flattenRecord(payload);
+  const paymentList = isRecord(detailSource)
+    ? ["payments", "pagos", "abonos"]
+        .map((key) => getCaseInsensitiveValue(detailSource, key))
+        .find((value): value is unknown[] => Array.isArray(value))
+    : undefined;
+  const firstPaymentRecord =
+    paymentList && isRecord(paymentList[0])
+      ? flattenRecord(paymentList[0])
+      : {};
   const items = extractCuentiSaleItemCandidates(detailSource)
     .map(mapCuentiInvoiceSyncItem)
     .filter((item): item is CuentiInvoiceSyncItem => Boolean(item));
@@ -1591,6 +1600,8 @@ function mapCuentiInvoiceSyncDetail(
       "totalPendientePago",
       "saldo_pendiente",
       "saldoPendiente",
+      "pending_payment",
+      "pendingPayment",
       "balance_due",
       "balanceDue"
     ]),
@@ -1622,17 +1633,28 @@ function mapCuentiInvoiceSyncDetail(
       "totalAbono",
       "valor_pagado",
       "valorPagado",
+      "total_payment",
+      "totalPayment",
       "paid_amount",
       "paidAmount"
     ]),
-    paymentMethod: findFirstTextValue(headerRecord, [
-      "medio_pago",
-      "medioPago",
-      "payment_method",
-      "paymentMethod",
-      "forma_pago",
-      "formaPago"
-    ]),
+    paymentMethod:
+      findFirstTextValue(headerRecord, [
+        "medio_pago",
+        "medioPago",
+        "payment_method",
+        "paymentMethod",
+        "forma_pago",
+        "formaPago"
+      ]) ??
+      findFirstTextValue(firstPaymentRecord, [
+        "payment_method_name",
+        "paymentMethodName",
+        "nombre_medio_pago",
+        "nombreMedioPago",
+        "medio_pago",
+        "medioPago"
+      ]),
     paymentStatus: findFirstTextValue(headerRecord, [
       "estado_pago",
       "estadoPago",

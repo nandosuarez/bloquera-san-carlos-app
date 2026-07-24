@@ -562,7 +562,10 @@ async function upsertInvoiceDerivedPayments(
           sale.sale_on,
           sale.sale_time,
           COALESCE(sale.payment_status, sale.status) AS status,
-          sale.payment_method,
+          COALESCE(
+            sale.payment_method,
+            source_payment.payment_method
+          ) AS payment_method,
           customer.name AS counterparty_name,
           customer.external_id AS counterparty_external_id,
           sale.is_voided,
@@ -570,6 +573,8 @@ async function upsertInvoiceDerivedPayments(
           CASE
             WHEN COALESCE(sale.paid_amount, 0) > 0
               THEN sale.paid_amount
+            WHEN COALESCE(source_payment.paid_amount, 0) > 0
+              THEN source_payment.paid_amount
             WHEN sale.balance_due IS NOT NULL
               AND sale.balance_due <= 0
               THEN COALESCE(sale.net_amount, sale.gross_amount)
@@ -584,6 +589,29 @@ async function upsertInvoiceDerivedPayments(
         FROM analytics.fact_sale AS sale
         LEFT JOIN analytics.dim_customer AS customer
           ON customer.id = sale.customer_id
+        LEFT JOIN integration.source_record AS source
+          ON source.source_system = $1
+          AND source.entity_type = 'INVOICE_DETAIL'
+          AND source.branch_id = sale.branch_id
+          AND source.external_id = sale.external_id
+        LEFT JOIN LATERAL (
+          SELECT
+            CASE
+              WHEN (
+                source.payload #>> '{data,header,total_payment}'
+              ) ~ '^[0-9]+([.][0-9]+)?$'
+                THEN (
+                  source.payload #>> '{data,header,total_payment}'
+                )::numeric
+              ELSE NULL
+            END AS paid_amount,
+            COALESCE(
+              source.payload #>>
+                '{data,payments,0,payment_method_name}',
+              source.payload #>>
+                '{data,pagos,0,nombre_medio_pago}'
+            ) AS payment_method
+        ) AS source_payment ON TRUE
         WHERE sale.source_system = $1
           AND sale.branch_id = $2
       ),
