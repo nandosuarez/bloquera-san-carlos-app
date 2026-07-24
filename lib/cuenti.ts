@@ -262,6 +262,19 @@ export function getCuentiConfigStatus(): CuentiConfigStatus {
   };
 }
 
+export async function getCuentiResolvedBranchId() {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  return resolveCuentiBranchId(getCuentiCredentials(), status);
+}
+
 export async function testCuentiConnection(): Promise<CuentiConnectionResult> {
   const credentials = getCuentiCredentials();
   const payload = await requestCuentiData(credentials, "branches");
@@ -270,6 +283,32 @@ export async function testCuentiConnection(): Promise<CuentiConnectionResult> {
     branchCount: countResponseItems(payload),
     message: getResponseMessage(payload) ?? "Conexion con Cuenti exitosa."
   };
+}
+
+async function resolveCuentiBranchId(
+  credentials: CuentiCredentials,
+  status: CuentiConfigStatus
+) {
+  const configuredBranchId = status.branchId ?? status.companyId;
+
+  try {
+    const payload = await requestCuentiData(credentials, "branches");
+    const branchIds = extractCatalogItems(payload, "branches").map(
+      (branch) => branch.id
+    );
+
+    if (branchIds.includes(configuredBranchId)) {
+      return configuredBranchId;
+    }
+
+    return branchIds[0] ?? configuredBranchId;
+  } catch (error) {
+    console.warn("Could not resolve Cuenti branch catalog", {
+      message: error instanceof Error ? error.message : "Unknown Cuenti error"
+    });
+
+    return configuredBranchId;
+  }
 }
 
 export async function getCuentiReferenceData(): Promise<CuentiReferenceData> {
@@ -600,6 +639,7 @@ export async function getCuentiSaleDetail(
 }
 
 export async function getCuentiInvoiceSyncPage(input: {
+  branchId?: string | null;
   dateFrom: string;
   dateTo: string;
   page: number;
@@ -615,13 +655,16 @@ export async function getCuentiInvoiceSyncPage(input: {
   }
 
   const credentials = getCuentiCredentials();
+  const branchId =
+    normalizeOptionalText(input.branchId) ??
+    (await resolveCuentiBranchId(credentials, status));
   const page = Math.max(1, normalizePositiveInteger(input.page, 1));
   const pageSize = Math.min(
-    200,
+    100,
     Math.max(1, normalizePositiveInteger(input.pageSize, 100))
   );
   const payload = await requestCuentiData(credentials, "invoices", {
-    branchId: status.branchId,
+    branchId,
     dateFrom: input.dateFrom,
     dateTo: input.dateTo,
     page: String(page),
@@ -630,7 +673,7 @@ export async function getCuentiInvoiceSyncPage(input: {
   const rawItems = extractResponseItems(payload);
   const records = rawItems
     .map((rawPayload) => {
-      const summary = mapCuentiSaleSummary(rawPayload, status.branchId, "invoice");
+      const summary = mapCuentiSaleSummary(rawPayload, branchId, "invoice");
 
       return summary ? { rawPayload, summary } : null;
     })
@@ -638,7 +681,7 @@ export async function getCuentiInvoiceSyncPage(input: {
   const pagination = extractCuentiPagination(payload);
 
   return {
-    branchId: status.branchId,
+    branchId,
     page: pagination.page ?? page,
     pageSize: pagination.pageSize ?? pageSize,
     rawItemsSeen: rawItems.length,
@@ -649,7 +692,8 @@ export async function getCuentiInvoiceSyncPage(input: {
 }
 
 export async function getCuentiInvoiceSyncDetail(
-  ref: string
+  ref: string,
+  branchId?: string | null
 ): Promise<CuentiInvoiceSyncDetail | null> {
   const normalizedRef = normalizeOptionalText(ref);
   const status = getCuentiConfigStatus();
@@ -669,19 +713,23 @@ export async function getCuentiInvoiceSyncDetail(
   }
 
   const credentials = getCuentiCredentials();
+  const resolvedBranchId =
+    normalizeOptionalText(branchId) ??
+    (await resolveCuentiBranchId(credentials, status));
   const payload = await requestCuentiData(credentials, "invoice", {
-    branchId: status.branchId,
+    branchId: resolvedBranchId,
     ref: normalizedRef
   });
 
   return mapCuentiInvoiceSyncDetail(
     payload,
-    status.branchId,
+    resolvedBranchId,
     normalizedRef
   );
 }
 
 export async function getCuentiPaymentSyncPage(input: {
+  branchId?: string | null;
   dateFrom: string;
   dateTo: string;
   page: number;
@@ -697,13 +745,16 @@ export async function getCuentiPaymentSyncPage(input: {
   }
 
   const credentials = getCuentiCredentials();
+  const branchId =
+    normalizeOptionalText(input.branchId) ??
+    (await resolveCuentiBranchId(credentials, status));
   const page = Math.max(1, normalizePositiveInteger(input.page, 1));
   const pageSize = Math.min(
-    200,
+    100,
     Math.max(1, normalizePositiveInteger(input.pageSize, 100))
   );
   const payload = await requestCuentiData(credentials, "payments", {
-    branchId: status.branchId,
+    branchId,
     dateFrom: input.dateFrom,
     dateTo: input.dateTo,
     page: String(page),
@@ -718,7 +769,7 @@ export async function getCuentiPaymentSyncPage(input: {
   const pagination = extractCuentiPagination(payload);
 
   return {
-    branchId: status.branchId,
+    branchId,
     page: pagination.page ?? page,
     pageSize: pagination.pageSize ?? pageSize,
     rawItemsSeen: rawItems.length,
@@ -729,7 +780,8 @@ export async function getCuentiPaymentSyncPage(input: {
 }
 
 export async function getCuentiPaymentSyncDetail(
-  ref: string
+  ref: string,
+  branchId?: string | null
 ): Promise<CuentiPaymentSyncRecord | null> {
   const normalizedRef = normalizeOptionalText(ref);
   const status = getCuentiConfigStatus();
@@ -749,8 +801,11 @@ export async function getCuentiPaymentSyncDetail(
   }
 
   const credentials = getCuentiCredentials();
+  const resolvedBranchId =
+    normalizeOptionalText(branchId) ??
+    (await resolveCuentiBranchId(credentials, status));
   const payload = await requestCuentiData(credentials, "payment", {
-    branchId: status.branchId,
+    branchId: resolvedBranchId,
     ref: normalizedRef
   });
 
@@ -758,7 +813,8 @@ export async function getCuentiPaymentSyncDetail(
 }
 
 export async function getCuentiPurchaseSyncDetail(
-  ref: string
+  ref: string,
+  branchId?: string | null
 ): Promise<CuentiInvoiceSyncDetail | null> {
   const normalizedRef = normalizeOptionalText(ref);
   const status = getCuentiConfigStatus();
@@ -778,13 +834,16 @@ export async function getCuentiPurchaseSyncDetail(
   }
 
   const credentials = getCuentiCredentials();
+  const resolvedBranchId =
+    normalizeOptionalText(branchId) ??
+    (await resolveCuentiBranchId(credentials, status));
   const payload = await requestCuentiData(credentials, "purchase", {
-    branchId: status.branchId,
+    branchId: resolvedBranchId,
     ref: normalizedRef
   });
   const detail = mapCuentiInvoiceSyncDetail(
     payload,
-    status.branchId,
+    resolvedBranchId,
     normalizedRef
   );
 

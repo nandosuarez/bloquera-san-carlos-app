@@ -6,6 +6,7 @@ import {
   getCuentiPaymentSyncDetail,
   getCuentiPaymentSyncPage,
   getCuentiPurchaseSyncDetail,
+  getCuentiResolvedBranchId,
   type CuentiInvoiceSyncDetail,
   type CuentiInvoiceSyncItem,
   type CuentiPaymentSyncRecord
@@ -93,8 +94,11 @@ export async function syncCuentiPaymentsWarehouse(input?: {
     );
   }
 
+  const branchId = config.hasToken
+    ? await getCuentiResolvedBranchId()
+    : config.branchId;
   const client = await getDb().connect();
-  const lockKey = `analytics:${SOURCE_SYSTEM}:${PAYMENT_ENTITY}:${config.branchId}`;
+  const lockKey = `analytics:${SOURCE_SYSTEM}:${PAYMENT_ENTITY}:${branchId}`;
   let hasLock = false;
   let runId: string | null = null;
   const counters: SyncCounters = {
@@ -119,11 +123,11 @@ export async function syncCuentiPaymentsWarehouse(input?: {
     const window = await resolveSyncWindow(
       client,
       PAYMENT_ENTITY,
-      config.branchId,
+      branchId,
       input
     );
     runId = await createRun(client, {
-      branchId: config.branchId,
+      branchId,
       dateFrom: window.dateFrom,
       dateTo: window.dateTo,
       entityType: PAYMENT_ENTITY,
@@ -134,7 +138,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
       readPositiveInteger(process.env.CUENTI_ANALYTICS_PAGE_SIZE) ??
         DEFAULT_PAGE_SIZE,
       1,
-      200
+      100
     );
     const maxPages = clampInteger(
       input?.maxPages ??
@@ -148,6 +152,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
 
     for (let offset = 0; offset < maxPages; offset += 1) {
       const pageResult = await getCuentiPaymentSyncPage({
+        branchId,
         dateFrom: window.dateFrom,
         dateTo: window.dateTo,
         page: currentPage,
@@ -160,7 +165,10 @@ export async function syncCuentiPaymentsWarehouse(input?: {
         let payment = summary;
 
         try {
-          const detail = await getCuentiPaymentSyncDetail(summary.externalId);
+          const detail = await getCuentiPaymentSyncDetail(
+            summary.externalId,
+            pageResult.branchId
+          );
           payment = detail ? mergePayment(summary, detail) : summary;
         } catch (error) {
           console.warn("Could not load Cuenti payment detail", {
@@ -175,7 +183,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
         }
 
         await upsertSourceRecord(client, {
-          branchId: config.branchId,
+          branchId,
           documentNumber: payment.documentNumber,
           entityType: "PAYMENT",
           externalId: payment.externalId,
@@ -185,7 +193,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
         });
         const outcome = await upsertPayment(
           client,
-          config.branchId,
+          branchId,
           runId,
           payment
         );
@@ -214,7 +222,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
 
     const nextPage = windowComplete ? 1 : currentPage;
     const backfillComplete = await saveSyncState(client, {
-      branchId: config.branchId,
+      branchId,
       dateFrom: window.dateFrom,
       dateTo: window.dateTo,
       entityType: PAYMENT_ENTITY,
@@ -227,7 +235,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
     return {
       ...counters,
       backfillComplete,
-      branchId: config.branchId,
+      branchId,
       dateFrom: window.dateFrom,
       dateTo: window.dateTo,
       nextPage,
@@ -274,8 +282,11 @@ export async function syncCuentiPurchasesByRefs(input: {
     );
   }
 
+  const branchId = config.hasToken
+    ? await getCuentiResolvedBranchId()
+    : config.branchId;
   const client = await getDb().connect();
-  const lockKey = `analytics:${SOURCE_SYSTEM}:${PURCHASE_ENTITY}:${config.branchId}`;
+  const lockKey = `analytics:${SOURCE_SYSTEM}:${PURCHASE_ENTITY}:${branchId}`;
   let hasLock = false;
   let runId: string | null = null;
   const today = getBogotaDate();
@@ -299,7 +310,7 @@ export async function syncCuentiPurchasesByRefs(input: {
     }
 
     runId = await createRun(client, {
-      branchId: config.branchId,
+      branchId,
       dateFrom: today,
       dateTo: today,
       entityType: PURCHASE_ENTITY,
@@ -308,7 +319,7 @@ export async function syncCuentiPurchasesByRefs(input: {
     });
 
     for (const ref of refs) {
-      const detail = await getCuentiPurchaseSyncDetail(ref);
+      const detail = await getCuentiPurchaseSyncDetail(ref, branchId);
 
       if (!detail?.saleDate) {
         counters.recordsSkipped += 1;
@@ -316,7 +327,7 @@ export async function syncCuentiPurchasesByRefs(input: {
       }
 
       await upsertSourceRecord(client, {
-        branchId: config.branchId,
+        branchId,
         documentNumber: detail.documentNumber,
         entityType: "PURCHASE",
         externalId: ref,
@@ -326,7 +337,7 @@ export async function syncCuentiPurchasesByRefs(input: {
       });
       const outcome = await upsertPurchase(
         client,
-        config.branchId,
+        branchId,
         runId,
         ref,
         detail
@@ -339,7 +350,7 @@ export async function syncCuentiPurchasesByRefs(input: {
 
     return {
       ...counters,
-      branchId: config.branchId,
+      branchId,
       runId
     };
   } catch (error) {
@@ -381,6 +392,9 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
     };
   }
 
+  const branchId = config.hasToken
+    ? await getCuentiResolvedBranchId()
+    : config.branchId;
   const result = await getDb().query<{
     inventory_count: string;
     latest_snapshot_on: string | null;
@@ -450,7 +464,7 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
         LIMIT 1
       ) AS purchase_run ON TRUE
     `,
-    [SOURCE_SYSTEM, PAYMENT_ENTITY, PURCHASE_ENTITY, config.branchId]
+    [SOURCE_SYSTEM, PAYMENT_ENTITY, PURCHASE_ENTITY, branchId]
   );
   const row = result.rows[0];
 

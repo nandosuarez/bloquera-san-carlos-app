@@ -5,6 +5,7 @@ import {
   getCuentiConfigStatus,
   getCuentiInvoiceSyncDetail,
   getCuentiInvoiceSyncPage,
+  getCuentiResolvedBranchId,
   type CuentiInvoiceSyncDetail,
   type CuentiInvoiceSyncItem,
   type CuentiInvoiceSyncRecord
@@ -125,8 +126,11 @@ export async function syncCuentiSalesWarehouse(input?: {
     );
   }
 
+  const branchId = config.hasToken
+    ? await getCuentiResolvedBranchId()
+    : config.branchId;
   const client = await getDb().connect();
-  const lockKey = `analytics:${SOURCE_SYSTEM}:${ENTITY_TYPE}:${config.branchId}`;
+  const lockKey = `analytics:${SOURCE_SYSTEM}:${ENTITY_TYPE}:${branchId}`;
   let hasLock = false;
   let runId: string | null = null;
   let window: SyncWindow | null = null;
@@ -153,7 +157,7 @@ export async function syncCuentiSalesWarehouse(input?: {
       );
     }
 
-    window = await resolveSyncWindow(client, config.branchId, input);
+    window = await resolveSyncWindow(client, branchId, input);
     const runResult = await client.query<{ id: string }>(
       `
         INSERT INTO integration.sync_run (
@@ -171,7 +175,7 @@ export async function syncCuentiSalesWarehouse(input?: {
       [
         SOURCE_SYSTEM,
         ENTITY_TYPE,
-        config.branchId,
+        branchId,
         window.mode,
         window.dateFrom,
         window.dateTo,
@@ -191,13 +195,14 @@ export async function syncCuentiSalesWarehouse(input?: {
       readPositiveInteger(process.env.CUENTI_ANALYTICS_PAGE_SIZE) ??
         DEFAULT_PAGE_SIZE,
       1,
-      200
+      100
     );
     let currentPage = window.page;
     let windowComplete = false;
 
     for (let pageOffset = 0; pageOffset < maxPages; pageOffset += 1) {
       const pageResult = await getCuentiInvoiceSyncPage({
+        branchId,
         dateFrom: window.dateFrom,
         dateTo: window.dateTo,
         page: currentPage,
@@ -208,7 +213,7 @@ export async function syncCuentiSalesWarehouse(input?: {
 
       for (const record of pageResult.records) {
         await upsertSourceRecord(client, {
-          branchId: config.branchId,
+          branchId,
           documentNumber: record.summary.documentNumber,
           entityType: "INVOICE_SUMMARY",
           externalId: record.summary.cuentiSaleId,
@@ -218,7 +223,10 @@ export async function syncCuentiSalesWarehouse(input?: {
         });
       }
 
-      const details = await loadInvoiceDetails(pageResult.records);
+      const details = await loadInvoiceDetails(
+        pageResult.records,
+        pageResult.branchId
+      );
       const detailErrors = details.filter(
         (result): result is { error: unknown; record: CuentiInvoiceSyncRecord } =>
           "error" in result
@@ -236,7 +244,7 @@ export async function syncCuentiSalesWarehouse(input?: {
 
         const outcome = await upsertInvoice(
           client,
-          config.branchId,
+          branchId,
           runId,
           result.detail
         );
@@ -281,7 +289,7 @@ export async function syncCuentiSalesWarehouse(input?: {
 
     const nextPage = windowComplete ? 1 : currentPage;
     const state = await saveSuccessfulState(client, {
-      branchId: config.branchId,
+      branchId,
       dateFrom: window.dateFrom,
       dateTo: window.dateTo,
       nextPage,
@@ -319,7 +327,7 @@ export async function syncCuentiSalesWarehouse(input?: {
     return {
       ...counters,
       backfillComplete: state.backfillComplete,
-      branchId: config.branchId,
+      branchId,
       dateFrom: window.dateFrom,
       dateTo: window.dateTo,
       nextPage,
@@ -382,6 +390,9 @@ export async function getCuentiAnalyticsSyncStatus(): Promise<CuentiAnalyticsSyn
     };
   }
 
+  const branchId = config.hasToken
+    ? await getCuentiResolvedBranchId()
+    : config.branchId;
   const [stateResult, runResult, countResult] = await Promise.all([
     getDb().query<SyncStateRow>(
       `
@@ -396,7 +407,7 @@ export async function getCuentiAnalyticsSyncStatus(): Promise<CuentiAnalyticsSyn
           AND entity_type = $2
           AND branch_id = $3
       `,
-      [SOURCE_SYSTEM, ENTITY_TYPE, config.branchId]
+      [SOURCE_SYSTEM, ENTITY_TYPE, branchId]
     ),
     getDb().query<{
       date_from: string;
@@ -429,7 +440,7 @@ export async function getCuentiAnalyticsSyncStatus(): Promise<CuentiAnalyticsSyn
         ORDER BY started_at DESC
         LIMIT 1
       `,
-      [SOURCE_SYSTEM, ENTITY_TYPE, config.branchId]
+      [SOURCE_SYSTEM, ENTITY_TYPE, branchId]
     ),
     getDb().query<{
       invoice_count: string;
@@ -567,7 +578,10 @@ async function resolveSyncWindow(
   };
 }
 
-async function loadInvoiceDetails(records: CuentiInvoiceSyncRecord[]) {
+async function loadInvoiceDetails(
+  records: CuentiInvoiceSyncRecord[],
+  branchId: string
+) {
   const concurrency = clampInteger(
     readPositiveInteger(process.env.CUENTI_ANALYTICS_CONCURRENCY) ?? 5,
     1,
@@ -584,7 +598,10 @@ async function loadInvoiceDetails(records: CuentiInvoiceSyncRecord[]) {
       batch.map(async (record) => {
         try {
           return {
-            detail: await getCuentiInvoiceSyncDetail(record.summary.cuentiSaleId),
+            detail: await getCuentiInvoiceSyncDetail(
+              record.summary.cuentiSaleId,
+              branchId
+            ),
             record
           };
         } catch (error) {
