@@ -14,6 +14,7 @@ import {
 import { getDb } from "@/lib/db";
 
 const SOURCE_SYSTEM = "CUENTI";
+const INVOICE_PAYMENT_SOURCE_SYSTEM = "CUENTI_INVOICE";
 const PAYMENT_ENTITY = "PAYMENTS";
 const PURCHASE_ENTITY = "PURCHASES";
 const DEFAULT_PAGE_SIZE = 100;
@@ -65,6 +66,7 @@ export type CuentiFinancialSyncStatus = {
   payments: {
     backfillComplete: boolean;
     count: number;
+    invoiceDerivedCount: number;
     lastRunAt: Date | null;
     lastRunError: string | null;
     lastRunStatus: string | null;
@@ -218,6 +220,20 @@ export async function syncCuentiPaymentsWarehouse(input?: {
       }
 
       currentPage += 1;
+    }
+
+    if (
+      counters.sourceRows === 0 &&
+      (await hasNoDirectCuentiPayments(client, branchId))
+    ) {
+      const derived = await upsertInvoiceDerivedPayments(
+        client,
+        branchId,
+        runId
+      );
+      counters.details += derived.created + derived.updated;
+      counters.recordsCreated += derived.created;
+      counters.recordsUpdated += derived.updated;
     }
 
     const nextPage = windowComplete ? 1 : currentPage;
@@ -377,6 +393,7 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
       payments: {
         backfillComplete: false,
         count: 0,
+        invoiceDerivedCount: 0,
         lastRunAt: null,
         lastRunError: null,
         lastRunStatus: null,
@@ -400,6 +417,7 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
     latest_snapshot_on: string | null;
     payment_backfill_complete: boolean | null;
     payment_count: string;
+    payment_invoice_derived_count: string;
     payment_error: string | null;
     payment_next_page: number | null;
     payment_run_at: Date | null;
@@ -412,7 +430,17 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
   }>(
     `
       SELECT
-        (SELECT COUNT(*) FROM analytics.fact_payment)::text AS payment_count,
+        (
+          SELECT COUNT(*)
+          FROM analytics.fact_payment
+          WHERE branch_id = $4
+        )::text AS payment_count,
+        (
+          SELECT COUNT(*)
+          FROM analytics.fact_payment
+          WHERE branch_id = $4
+            AND source_system = $5
+        )::text AS payment_invoice_derived_count,
         (SELECT COUNT(*) FROM analytics.fact_purchase)::text AS purchase_count,
         (SELECT COUNT(*) FROM analytics.fact_purchase_item)::text
           AS purchase_item_count,
@@ -464,7 +492,13 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
         LIMIT 1
       ) AS purchase_run ON TRUE
     `,
-    [SOURCE_SYSTEM, PAYMENT_ENTITY, PURCHASE_ENTITY, branchId]
+    [
+      SOURCE_SYSTEM,
+      PAYMENT_ENTITY,
+      PURCHASE_ENTITY,
+      branchId,
+      INVOICE_PAYMENT_SOURCE_SYSTEM
+    ]
   );
   const row = result.rows[0];
 
@@ -476,6 +510,7 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
     payments: {
       backfillComplete: row?.payment_backfill_complete ?? false,
       count: Number(row?.payment_count ?? 0),
+      invoiceDerivedCount: Number(row?.payment_invoice_derived_count ?? 0),
       lastRunAt: row?.payment_run_at ?? null,
       lastRunError: row?.payment_error ?? null,
       lastRunStatus: row?.payment_status ?? null,
@@ -488,6 +523,178 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
       lastRunError: row?.purchase_error ?? null,
       lastRunStatus: row?.purchase_status ?? null
     }
+  };
+}
+
+async function hasNoDirectCuentiPayments(
+  client: PoolClient,
+  branchId: string
+) {
+  const result = await client.query<{ has_payments: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM analytics.fact_payment
+        WHERE source_system = $1
+          AND branch_id = $2
+      ) AS has_payments
+    `,
+    [SOURCE_SYSTEM, branchId]
+  );
+
+  return result.rows[0]?.has_payments !== true;
+}
+
+async function upsertInvoiceDerivedPayments(
+  client: PoolClient,
+  branchId: string,
+  runId: string
+) {
+  const result = await client.query<{
+    created: string;
+    updated: string;
+  }>(
+    `
+      WITH invoice_payments AS (
+        SELECT
+          sale.external_id,
+          sale.document_number,
+          sale.sale_on,
+          sale.sale_time,
+          COALESCE(sale.payment_status, sale.status) AS status,
+          sale.payment_method,
+          customer.name AS counterparty_name,
+          customer.external_id AS counterparty_external_id,
+          sale.is_voided,
+          sale.source_updated_at,
+          CASE
+            WHEN COALESCE(sale.paid_amount, 0) > 0
+              THEN sale.paid_amount
+            WHEN sale.balance_due IS NOT NULL
+              AND sale.balance_due <= 0
+              THEN COALESCE(sale.net_amount, sale.gross_amount)
+            WHEN LOWER(COALESCE(sale.payment_status, '')) ~
+              '(pagad|paid|cancelad|complet)'
+              THEN COALESCE(sale.net_amount, sale.gross_amount)
+            WHEN NULLIF(TRIM(sale.payment_method), '') IS NOT NULL
+              AND LOWER(sale.payment_method) !~ '(credito|crédito|credit)'
+              THEN COALESCE(sale.net_amount, sale.gross_amount)
+            ELSE NULL
+          END AS amount
+        FROM analytics.fact_sale AS sale
+        LEFT JOIN analytics.dim_customer AS customer
+          ON customer.id = sale.customer_id
+        WHERE sale.source_system = $1
+          AND sale.branch_id = $2
+      ),
+      upserted AS (
+        INSERT INTO analytics.fact_payment (
+          source_system,
+          branch_id,
+          external_id,
+          document_number,
+          payment_on,
+          payment_time,
+          direction,
+          status,
+          payment_method,
+          bank_name,
+          counterparty_name,
+          counterparty_external_id,
+          related_document_type,
+          related_document_id,
+          related_document_number,
+          amount,
+          is_voided,
+          source_updated_at,
+          last_sync_run_id
+        )
+        SELECT
+          $3,
+          $2,
+          CONCAT('invoice:', invoice.external_id),
+          invoice.document_number,
+          invoice.sale_on,
+          invoice.sale_time,
+          'IN',
+          invoice.status,
+          invoice.payment_method,
+          NULL,
+          invoice.counterparty_name,
+          invoice.counterparty_external_id,
+          'INVOICE',
+          invoice.external_id,
+          invoice.document_number,
+          invoice.amount,
+          invoice.is_voided,
+          invoice.source_updated_at,
+          $4
+        FROM invoice_payments AS invoice
+        WHERE invoice.amount > 0
+        ON CONFLICT (source_system, branch_id, external_id)
+        DO UPDATE SET
+          document_number = EXCLUDED.document_number,
+          payment_on = EXCLUDED.payment_on,
+          payment_time = EXCLUDED.payment_time,
+          direction = EXCLUDED.direction,
+          status = EXCLUDED.status,
+          payment_method = EXCLUDED.payment_method,
+          bank_name = EXCLUDED.bank_name,
+          counterparty_name = EXCLUDED.counterparty_name,
+          counterparty_external_id = EXCLUDED.counterparty_external_id,
+          related_document_type = EXCLUDED.related_document_type,
+          related_document_id = EXCLUDED.related_document_id,
+          related_document_number = EXCLUDED.related_document_number,
+          amount = EXCLUDED.amount,
+          is_voided = EXCLUDED.is_voided,
+          source_updated_at = EXCLUDED.source_updated_at,
+          last_synced_at = NOW(),
+          last_sync_run_id = EXCLUDED.last_sync_run_id
+        WHERE (
+          analytics.fact_payment.document_number,
+          analytics.fact_payment.payment_on,
+          analytics.fact_payment.payment_time,
+          analytics.fact_payment.status,
+          analytics.fact_payment.payment_method,
+          analytics.fact_payment.counterparty_name,
+          analytics.fact_payment.counterparty_external_id,
+          analytics.fact_payment.related_document_id,
+          analytics.fact_payment.related_document_number,
+          analytics.fact_payment.amount,
+          analytics.fact_payment.is_voided,
+          analytics.fact_payment.source_updated_at
+        ) IS DISTINCT FROM (
+          EXCLUDED.document_number,
+          EXCLUDED.payment_on,
+          EXCLUDED.payment_time,
+          EXCLUDED.status,
+          EXCLUDED.payment_method,
+          EXCLUDED.counterparty_name,
+          EXCLUDED.counterparty_external_id,
+          EXCLUDED.related_document_id,
+          EXCLUDED.related_document_number,
+          EXCLUDED.amount,
+          EXCLUDED.is_voided,
+          EXCLUDED.source_updated_at
+        )
+        RETURNING xmax = 0 AS inserted
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE inserted)::text AS created,
+        COUNT(*) FILTER (WHERE NOT inserted)::text AS updated
+      FROM upserted
+    `,
+    [
+      SOURCE_SYSTEM,
+      branchId,
+      INVOICE_PAYMENT_SOURCE_SYSTEM,
+      runId
+    ]
+  );
+
+  return {
+    created: Number(result.rows[0]?.created ?? 0),
+    updated: Number(result.rows[0]?.updated ?? 0)
   };
 }
 

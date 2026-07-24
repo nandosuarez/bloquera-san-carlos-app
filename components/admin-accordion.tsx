@@ -140,6 +140,7 @@ type CuentiFinancialStatusView = {
   payments: {
     backfillComplete: boolean;
     count: number;
+    invoiceDerivedCount: number;
     lastRunAt: string | null;
     lastRunError: string | null;
     lastRunStatus: string | null;
@@ -448,10 +449,14 @@ function CuentiSection({
           <strong>Pagos y flujo de caja</strong>
           <p>
             Guarda los recaudos y pagos de Cuenti con fecha, tercero, medio de
-            pago y documento relacionado.
+            pago y documento relacionado. Si Cuenti no entrega movimientos
+            separados, recupera los recaudos desde las facturas pagadas.
           </p>
           <p className="table-muted">
             Pagos guardados: {financialStatus?.payments.count ?? 0}.
+            {(financialStatus?.payments.invoiceDerivedCount ?? 0) > 0
+              ? ` Recuperados desde facturas: ${financialStatus?.payments.invoiceDerivedCount}.`
+              : ""}
             {financialStatus?.payments.lastRunAt
               ? ` Ultimo intento: ${formatDateTime(
                   financialStatus.payments.lastRunAt
