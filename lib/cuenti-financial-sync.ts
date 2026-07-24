@@ -222,10 +222,7 @@ export async function syncCuentiPaymentsWarehouse(input?: {
       currentPage += 1;
     }
 
-    if (
-      counters.sourceRows === 0 &&
-      (await hasNoDirectCuentiPayments(client, branchId))
-    ) {
+    if (await hasNoDirectCuentiPayments(client, branchId)) {
       const derived = await upsertInvoiceDerivedPayments(
         client,
         branchId,
