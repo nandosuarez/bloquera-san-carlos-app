@@ -1,40 +1,65 @@
 "use client";
 
-import { useEffect } from "react";
-import { tryRecoverClient } from "@/lib/client-error-recovery";
+import { useEffect, useState } from "react";
+import {
+  forceReloadClient,
+  tryRecoverClient
+} from "@/lib/client-error-recovery";
 
 export default function AppError({
-  error,
-  reset
+  error
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
+  const [recoveryFailed, setRecoveryFailed] = useState(false);
+
   useEffect(() => {
-    tryRecoverClient(error);
+    if (!tryRecoverClient(error)) {
+      setRecoveryFailed(true);
+    }
   }, [error]);
 
   return (
     <main className="app-error-screen">
-      <section className="app-error-card">
+      <section aria-live="polite" className="app-error-card">
         <span className="app-error-mark">BSC</span>
-        <p className="app-error-eyebrow">Conexion recuperada</p>
-        <h1>No pudimos mostrar esta pantalla</h1>
-        <p>
-          La aplicacion intento actualizar sus archivos automaticamente. Si el
-          problema continua, vuelve a intentar o regresa al inicio.
-        </p>
-        <div className="form-actions">
-          <button className="primary-button" onClick={reset} type="button">
-            Intentar de nuevo
-          </button>
-          <a className="ghost-button" href="/inicio">
-            Ir al inicio
-          </a>
-        </div>
-        {error.digest ? (
-          <small className="table-muted">Referencia: {error.digest}</small>
-        ) : null}
+        {recoveryFailed ? (
+          <>
+            <p className="app-error-eyebrow">Necesitamos recargar</p>
+            <h1>No pudimos mostrar esta pantalla</h1>
+            <p>
+              Presiona el boton para descargar la version mas reciente de la
+              aplicacion.
+            </p>
+            <div className="form-actions">
+              <button
+                className="primary-button"
+                onClick={forceReloadClient}
+                type="button"
+              >
+                Recargar aplicacion
+              </button>
+              <a className="ghost-button" href="/inicio">
+                Ir al inicio
+              </a>
+            </div>
+            {error.digest ? (
+              <small className="table-muted">
+                Referencia: {error.digest}
+              </small>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <p className="app-error-eyebrow">Nueva version disponible</p>
+            <h1>Actualizando la aplicacion</h1>
+            <p>
+              Estamos cargando los archivos mas recientes. Esta pantalla se
+              cerrara automaticamente.
+            </p>
+            <span aria-hidden="true" className="app-recovery-loader" />
+          </>
+        )}
       </section>
     </main>
   );

@@ -18,19 +18,40 @@ export function tryRecoverClient(error: unknown) {
     return false;
   }
 
-  sessionStorage.setItem(
-    RECOVERY_KEY,
-    JSON.stringify({
-      at: now,
-      message: message.slice(0, 300),
-      path: window.location.pathname
-    })
-  );
+  try {
+    sessionStorage.setItem(
+      RECOVERY_KEY,
+      JSON.stringify({
+        at: now,
+        message: message.slice(0, 300),
+        path: window.location.pathname
+      })
+    );
+  } catch {
+    // Some browser privacy modes disable session storage. Recovery can continue.
+  }
+
   const nextUrl = new URL(window.location.href);
   nextUrl.searchParams.set("_clientRefresh", String(now));
   window.location.replace(nextUrl.toString());
 
   return true;
+}
+
+export function forceReloadClient() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    sessionStorage.removeItem(RECOVERY_KEY);
+  } catch {
+    // Reloading does not depend on session storage being available.
+  }
+
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set("_clientRefresh", String(Date.now()));
+  window.location.replace(nextUrl.toString());
 }
 
 export function clearRecoveryQuery() {

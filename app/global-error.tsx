@@ -1,33 +1,58 @@
 "use client";
 
-import { useEffect } from "react";
-import { tryRecoverClient } from "@/lib/client-error-recovery";
+import { useEffect, useState } from "react";
+import {
+  forceReloadClient,
+  tryRecoverClient
+} from "@/lib/client-error-recovery";
 
 export default function GlobalError({
-  error,
-  reset
+  error
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
+  const [recoveryFailed, setRecoveryFailed] = useState(false);
+
   useEffect(() => {
-    tryRecoverClient(error);
+    if (!tryRecoverClient(error)) {
+      setRecoveryFailed(true);
+    }
   }, [error]);
 
   return (
     <html lang="es">
       <body>
         <main className="app-error-screen">
-          <section className="app-error-card">
+          <section aria-live="polite" className="app-error-card">
             <span className="app-error-mark">BSC</span>
-            <h1>Estamos recuperando la aplicacion</h1>
-            <p>
-              Se detecto un cambio de version. Intenta nuevamente para cargar
-              los archivos actualizados.
-            </p>
-            <button className="primary-button" onClick={reset} type="button">
-              Intentar de nuevo
-            </button>
+            {recoveryFailed ? (
+              <>
+                <p className="app-error-eyebrow">Necesitamos recargar</p>
+                <h1>No pudimos iniciar la aplicacion</h1>
+                <p>
+                  Presiona el boton para descargar la version mas reciente.
+                </p>
+                <button
+                  className="primary-button"
+                  onClick={forceReloadClient}
+                  type="button"
+                >
+                  Recargar aplicacion
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="app-error-eyebrow">
+                  Nueva version disponible
+                </p>
+                <h1>Actualizando la aplicacion</h1>
+                <p>
+                  Estamos cargando los archivos mas recientes. Esta pantalla se
+                  cerrara automaticamente.
+                </p>
+                <span aria-hidden="true" className="app-recovery-loader" />
+              </>
+            )}
           </section>
         </main>
       </body>

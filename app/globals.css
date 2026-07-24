@@ -2319,3 +2319,31 @@ textarea {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+
+.app-recovery-loader {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(177, 17, 27, 0.1);
+}
+
+.app-recovery-loader::after {
+  content: "";
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-deep), var(--sun));
+  animation: app-recovery-progress 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes app-recovery-progress {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(138%);
+  }
+}
