@@ -31,6 +31,12 @@ const errorMessages: Record<string, string> = {
   cuenti_payment_sync_running: "Ya hay una sincronizacion de pagos en proceso.",
   cuenti_purchases_sync_failed:
     "No fue posible cargar las compras indicadas.",
+  cuenti_warehouse_inventory_failed:
+    "Ventas y pagos se actualizaron, pero no fue posible actualizar el inventario de Cuenti.",
+  cuenti_warehouse_payments_failed:
+    "Las ventas se actualizaron, pero no fue posible sincronizar los pagos de Cuenti.",
+  cuenti_warehouse_sales_failed:
+    "No fue posible sincronizar las ventas de Cuenti. Revisa el ultimo intento en la bodega.",
   cuenti_warehouse_sync_failed:
     "No fue posible completar toda la sincronizacion de la bodega.",
   missing_cuenti_purchase_ref: "Escribe al menos un ID de compra de Cuenti.",

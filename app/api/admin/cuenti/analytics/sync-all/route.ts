@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CuentiIntegrationError } from "@/lib/cuenti";
-import { syncCuentiWarehouse } from "@/lib/cuenti-sync-coordinator";
+import {
+  CuentiWarehouseSyncError,
+  syncCuentiWarehouse
+} from "@/lib/cuenti-sync-coordinator";
 import { requireAdminRequest } from "@/lib/permissions";
 import { redirectTo } from "@/lib/redirects";
 
@@ -25,8 +27,8 @@ export async function POST(request: NextRequest) {
     console.error("Error syncing complete Cuenti warehouse", error);
 
     const code =
-      error instanceof CuentiIntegrationError
-        ? error.code
+      error instanceof CuentiWarehouseSyncError
+        ? `cuenti_warehouse_${error.stage}_failed`
         : "cuenti_warehouse_sync_failed";
 
     return redirectTo(request, `/administracion?section=cuenti&error=${code}`);
