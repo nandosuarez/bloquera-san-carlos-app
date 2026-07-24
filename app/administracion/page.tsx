@@ -233,6 +233,12 @@ export default async function AdministrationPage({
           cuentiFinancialStatus
             ? {
                 ...cuentiFinancialStatus,
+                inventory: {
+                  ...cuentiFinancialStatus.inventory,
+                  latestSnapshotOn: serializeDate(
+                    cuentiFinancialStatus.inventory.latestSnapshotOn
+                  )
+                },
                 payments: {
                   ...cuentiFinancialStatus.payments,
                   lastRunAt:
@@ -250,9 +256,21 @@ export default async function AdministrationPage({
           cuentiAnalyticsStatus
             ? {
                 ...cuentiAnalyticsStatus,
+                activeDateFrom: serializeDate(
+                  cuentiAnalyticsStatus.activeDateFrom
+                ),
+                activeDateTo: serializeDate(
+                  cuentiAnalyticsStatus.activeDateTo
+                ),
                 lastRun: cuentiAnalyticsStatus.lastRun
                   ? {
                       ...cuentiAnalyticsStatus.lastRun,
+                      dateFrom:
+                        serializeDate(cuentiAnalyticsStatus.lastRun.dateFrom) ??
+                        "",
+                      dateTo:
+                        serializeDate(cuentiAnalyticsStatus.lastRun.dateTo) ??
+                        "",
                       finishedAt:
                         cuentiAnalyticsStatus.lastRun.finishedAt?.toISOString() ??
                         null,
@@ -338,6 +356,12 @@ function normalizeSection(value?: string) {
   if (value === "transport-providers") return "transport-providers";
   if (value === "cuenti") return "cuenti";
   return "customers";
+}
+
+function serializeDate(value: Date | string | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
 }
 
 function buildCuentiSuccessMessage(searchParams?: AdministrationPageProps["searchParams"]) {

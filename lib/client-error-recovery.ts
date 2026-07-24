@@ -1,5 +1,29 @@
 const RECOVERY_KEY = "bsc-client-recovery";
 const RECOVERY_WINDOW_MS = 60_000;
+const RECOVERABLE_ERROR_PATTERNS = [
+  "chunkloaderror",
+  "loading chunk",
+  "failed to fetch dynamically imported module",
+  "css_chunk_load_failed",
+  "/_next/static/",
+  "hydration",
+  "react error #418",
+  "react error #423"
+];
+
+export function isRecoverableClientError(...values: unknown[]) {
+  const message = values
+    .map((value) => {
+      if (value instanceof Error) return `${value.name} ${value.message}`;
+      return String(value ?? "");
+    })
+    .join(" ")
+    .toLowerCase();
+
+  return RECOVERABLE_ERROR_PATTERNS.some((pattern) =>
+    message.includes(pattern)
+  );
+}
 
 export function tryRecoverClient(error: unknown) {
   if (typeof window === "undefined") {

@@ -991,10 +991,10 @@ async function resolveSyncWindow(
   const stateResult = await client.query<SyncStateRow>(
     `
       SELECT
-        active_date_from,
-        active_date_to,
+        active_date_from::text AS active_date_from,
+        active_date_to::text AS active_date_to,
         backfill_complete,
-        last_successful_to,
+        last_successful_to::text AS last_successful_to,
         next_page
       FROM integration.sync_state
       WHERE source_system = $1

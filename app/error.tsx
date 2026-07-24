@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   forceReloadClient,
+  isRecoverableClientError,
   tryRecoverClient
 } from "@/lib/client-error-recovery";
 
@@ -11,13 +12,14 @@ export default function AppError({
 }: {
   error: Error & { digest?: string };
 }) {
-  const [recoveryFailed, setRecoveryFailed] = useState(false);
+  const isRecoverable = isRecoverableClientError(error);
+  const [recoveryFailed, setRecoveryFailed] = useState(!isRecoverable);
 
   useEffect(() => {
-    if (!tryRecoverClient(error)) {
+    if (!isRecoverable || !tryRecoverClient(error)) {
       setRecoveryFailed(true);
     }
-  }, [error]);
+  }, [error, isRecoverable]);
 
   return (
     <main className="app-error-screen">
