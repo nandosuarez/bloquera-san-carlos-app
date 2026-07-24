@@ -15,7 +15,7 @@ import { getDb } from "@/lib/db";
 
 const SOURCE_SYSTEM = "CUENTI";
 const INVOICE_PAYMENT_SOURCE_SYSTEM = "CUENTI_INVOICE";
-const PAYMENT_ENTITY = "PAYMENTS";
+const PAYMENT_ENTITY = "PAYMENTS_V2";
 const PURCHASE_ENTITY = "PURCHASES";
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 1;
@@ -66,11 +66,13 @@ export type CuentiFinancialSyncStatus = {
   payments: {
     backfillComplete: boolean;
     count: number;
+    incomingCount: number;
     invoiceDerivedCount: number;
     lastRunAt: Date | null;
     lastRunError: string | null;
     lastRunStatus: string | null;
     nextPage: number;
+    outgoingCount: number;
   };
   purchases: {
     count: number;
@@ -166,17 +168,19 @@ export async function syncCuentiPaymentsWarehouse(input?: {
       for (const summary of pageResult.records) {
         let payment = summary;
 
-        try {
-          const detail = await getCuentiPaymentSyncDetail(
-            summary.externalId,
-            pageResult.branchId
-          );
-          payment = detail ? mergePayment(summary, detail) : summary;
-        } catch (error) {
-          console.warn("Could not load Cuenti payment detail", {
-            externalId: summary.externalId,
-            message: error instanceof Error ? error.message : "Unknown error"
-          });
+        if (!summary.externalId.startsWith("payment:")) {
+          try {
+            const detail = await getCuentiPaymentSyncDetail(
+              summary.externalId,
+              pageResult.branchId
+            );
+            payment = detail ? mergePayment(summary, detail) : summary;
+          } catch (error) {
+            console.warn("Could not load Cuenti payment detail", {
+              externalId: summary.externalId,
+              message: error instanceof Error ? error.message : "Unknown error"
+            });
+          }
         }
 
         if (!payment.paymentDate || payment.amount === null) {
@@ -222,15 +226,13 @@ export async function syncCuentiPaymentsWarehouse(input?: {
       currentPage += 1;
     }
 
-    if (await hasNoDirectCuentiPayments(client, branchId)) {
-      const derived = await upsertInvoiceDerivedPayments(
+    if (windowComplete) {
+      await deleteInvoiceDerivedPaymentsForWindow(
         client,
         branchId,
-        runId
+        window.dateFrom,
+        window.dateTo
       );
-      counters.details += derived.created + derived.updated;
-      counters.recordsCreated += derived.created;
-      counters.recordsUpdated += derived.updated;
     }
 
     const nextPage = windowComplete ? 1 : currentPage;
@@ -390,11 +392,13 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
       payments: {
         backfillComplete: false,
         count: 0,
+        incomingCount: 0,
         invoiceDerivedCount: 0,
         lastRunAt: null,
         lastRunError: null,
         lastRunStatus: null,
-        nextPage: 1
+        nextPage: 1,
+        outgoingCount: 0
       },
       purchases: {
         count: 0,
@@ -414,7 +418,9 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
     latest_snapshot_on: string | null;
     payment_backfill_complete: boolean | null;
     payment_count: string;
+    payment_incoming_count: string;
     payment_invoice_derived_count: string;
+    payment_outgoing_count: string;
     payment_error: string | null;
     payment_next_page: number | null;
     payment_run_at: Date | null;
@@ -432,6 +438,20 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
           FROM analytics.fact_payment
           WHERE branch_id = $4
         )::text AS payment_count,
+        (
+          SELECT COUNT(*)
+          FROM analytics.fact_payment
+          WHERE branch_id = $4
+            AND direction = 'IN'
+            AND is_voided = FALSE
+        )::text AS payment_incoming_count,
+        (
+          SELECT COUNT(*)
+          FROM analytics.fact_payment
+          WHERE branch_id = $4
+            AND direction = 'OUT'
+            AND is_voided = FALSE
+        )::text AS payment_outgoing_count,
         (
           SELECT COUNT(*)
           FROM analytics.fact_payment
@@ -507,11 +527,13 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
     payments: {
       backfillComplete: row?.payment_backfill_complete ?? false,
       count: Number(row?.payment_count ?? 0),
+      incomingCount: Number(row?.payment_incoming_count ?? 0),
       invoiceDerivedCount: Number(row?.payment_invoice_derived_count ?? 0),
       lastRunAt: row?.payment_run_at ?? null,
       lastRunError: row?.payment_error ?? null,
       lastRunStatus: row?.payment_status ?? null,
-      nextPage: Number(row?.payment_next_page ?? 1)
+      nextPage: Number(row?.payment_next_page ?? 1),
+      outgoingCount: Number(row?.payment_outgoing_count ?? 0)
     },
     purchases: {
       count: Number(row?.purchase_count ?? 0),
@@ -523,23 +545,21 @@ export async function getCuentiFinancialSyncStatus(): Promise<CuentiFinancialSyn
   };
 }
 
-async function hasNoDirectCuentiPayments(
+async function deleteInvoiceDerivedPaymentsForWindow(
   client: PoolClient,
-  branchId: string
+  branchId: string,
+  dateFrom: string,
+  dateTo: string
 ) {
-  const result = await client.query<{ has_payments: boolean }>(
+  await client.query(
     `
-      SELECT EXISTS (
-        SELECT 1
-        FROM analytics.fact_payment
-        WHERE source_system = $1
-          AND branch_id = $2
-      ) AS has_payments
+      DELETE FROM analytics.fact_payment
+      WHERE source_system = $1
+        AND branch_id = $2
+        AND payment_on BETWEEN $3::date AND $4::date
     `,
-    [SOURCE_SYSTEM, branchId]
+    [INVOICE_PAYMENT_SOURCE_SYSTEM, branchId, dateFrom, dateTo]
   );
-
-  return result.rows[0]?.has_payments !== true;
 }
 
 async function upsertInvoiceDerivedPayments(

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const DEFAULT_CUENTI_API_BASE_URL =
   "https://integrator-apps-api-dok.cuenti.co/api";
 const DEFAULT_CUENTI_COMPANY_ID = "7760";
@@ -779,38 +781,6 @@ export async function getCuentiPaymentSyncPage(input: {
   };
 }
 
-export async function getCuentiPaymentDiagnostics(input: {
-  dateFrom: string;
-  dateTo: string;
-}) {
-  const status = getCuentiConfigStatus();
-
-  if (!status.branchId) {
-    throw new CuentiIntegrationError(
-      "missing_cuenti_branch",
-      "Falta configurar CUENTI_BRANCH_ID."
-    );
-  }
-
-  const credentials = getCuentiCredentials();
-  const branchId = await resolveCuentiBranchId(credentials, status);
-  const payload = await requestCuentiData(credentials, "payments", {
-    branchId,
-    dateFrom: input.dateFrom,
-    dateTo: input.dateTo,
-    page: "1",
-    pageSize: "3"
-  });
-  const rawItems = extractResponseItems(payload);
-
-  return {
-    branchId,
-    container: describeDiagnosticContainer(payload),
-    rawItemsSeen: rawItems.length,
-    samples: rawItems.map((item) => collectDiagnosticFields(item))
-  };
-}
-
 export async function getCuentiPaymentSyncDetail(
   ref: string,
   branchId?: string | null
@@ -1244,109 +1214,6 @@ function extractCatalogItems(payload: CuentiRawResponse, endpoint: string) {
 
 function extractResponseItems(payload: CuentiRawResponse) {
   return extractItemsFromUnknown(payload) ?? [];
-}
-
-function describeDiagnosticContainer(value: unknown, depth = 0): unknown {
-  if (depth > 4) {
-    return typeof value;
-  }
-
-  if (Array.isArray(value)) {
-    return {
-      length: value.length,
-      sample: value.length > 0
-        ? describeDiagnosticContainer(value[0], depth + 1)
-        : null,
-      type: "array"
-    };
-  }
-
-  if (!isRecord(value)) {
-    return typeof value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value).map(([key, nestedValue]) => [
-      key,
-      describeDiagnosticContainer(nestedValue, depth + 1)
-    ])
-  );
-}
-
-function collectDiagnosticFields(value: unknown) {
-  const fields: Array<{
-    path: string;
-    type: string;
-    value: string | number | boolean | null;
-  }> = [];
-  const fieldPattern =
-    /(id|date|fecha|value|valor|amount|total|type|tipo|state|estado|payment|pago|direction|nature|naturaleza|concept|descripcion|detail|detalle|document|numero|method|medio)/;
-
-  collectDiagnosticFieldsFromValue(value, "$", fields, fieldPattern, 0);
-
-  return fields.slice(0, 120);
-}
-
-function collectDiagnosticFieldsFromValue(
-  value: unknown,
-  path: string,
-  fields: Array<{
-    path: string;
-    type: string;
-    value: string | number | boolean | null;
-  }>,
-  fieldPattern: RegExp,
-  depth: number
-) {
-  if (fields.length >= 120 || depth > 7 || value === null) {
-    return;
-  }
-
-  if (Array.isArray(value)) {
-    value.slice(0, 2).forEach((item, index) => {
-      collectDiagnosticFieldsFromValue(
-        item,
-        `${path}[${index}]`,
-        fields,
-        fieldPattern,
-        depth + 1
-      );
-    });
-    return;
-  }
-
-  if (!isRecord(value)) {
-    return;
-  }
-
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (fields.length >= 120) {
-      return;
-    }
-
-    const normalizedKey = normalizeFieldKey(key);
-    const fieldPath = `${path}.${key}`;
-
-    if (fieldPattern.test(normalizedKey)) {
-      fields.push({
-        path: fieldPath,
-        type: Array.isArray(nestedValue) ? "array" : typeof nestedValue,
-        value:
-          nestedValue === null ||
-          ["boolean", "number", "string"].includes(typeof nestedValue)
-            ? (nestedValue as string | number | boolean | null)
-            : null
-      });
-    }
-
-    collectDiagnosticFieldsFromValue(
-      nestedValue,
-      fieldPath,
-      fields,
-      fieldPattern,
-      depth + 1
-    );
-  }
 }
 
 function extractCuentiPagination(payload: CuentiRawResponse) {
@@ -1853,7 +1720,9 @@ function mapCuentiPaymentSyncRecord(
       "transactionId",
       "transaction_id",
       "id"
-    ]) ?? fallbackRef;
+    ]) ??
+    fallbackRef ??
+    buildCuentiPaymentFallbackId(record);
 
   if (!externalId) {
     return null;
@@ -1874,6 +1743,8 @@ function mapCuentiPaymentSyncRecord(
     "tipoDocumento"
   ]);
   const amount = findFirstNumberValue(record, [
+    "total_value",
+    "totalValue",
     "valor_pago",
     "valorPago",
     "payment_amount",
@@ -1883,13 +1754,35 @@ function mapCuentiPaymentSyncRecord(
     "total",
     "monto"
   ]);
-  const status = findFirstTextValue(record, [
+  const explicitStatus = findFirstTextValue(record, [
     "estado",
     "status",
     "state",
     "estado_pago",
     "estadoPago"
   ]);
+  const isActive = findFirstBooleanValue(record, [
+    "is_active",
+    "isActive",
+    "activo",
+    "active"
+  ]);
+  const isIncome = findFirstBooleanValue(record, [
+    "is_income",
+    "isIncome"
+  ]);
+  const explicitIsVoided = findFirstBooleanValue(record, [
+    "es_nulo",
+    "esNulo",
+    "anulado",
+    "anulada",
+    "is_voided",
+    "isVoided",
+    "voided"
+  ]);
+  const status =
+    explicitStatus ??
+    (isActive === null ? null : isActive ? "ACTIVE" : "VOIDED");
 
   return {
     amount: amount === null ? null : Math.abs(amount),
@@ -1908,6 +1801,8 @@ function mapCuentiPaymentSyncRecord(
       "idCliente",
       "id_proveedor",
       "idProveedor",
+      "customer_id",
+      "supplier_id",
       "counterpartyId",
       "customerId",
       "supplierId"
@@ -1922,12 +1817,26 @@ function mapCuentiPaymentSyncRecord(
       "nombre_proveedor",
       "nombreProveedor",
       "proveedor",
+      "customer_name",
+      "supplier_name",
+      "employee_name",
       "counterpartyName",
       "customerName",
       "supplierName"
     ]),
-    direction: normalizePaymentDirection(directionText, amount),
+    direction:
+      isIncome === null
+        ? normalizePaymentDirection(directionText, amount)
+        : isIncome
+          ? "IN"
+          : "OUT",
     documentNumber: findFirstTextValue(record, [
+      "box_number",
+      "boxNumber",
+      "boucher",
+      "voucher",
+      "account_number",
+      "accountNumber",
       "numero_pago",
       "numeroPago",
       "paymentNumber",
@@ -1938,17 +1847,12 @@ function mapCuentiPaymentSyncRecord(
     ]),
     externalId,
     isVoided:
-      findFirstBooleanValue(record, [
-        "es_nulo",
-        "esNulo",
-        "anulado",
-        "anulada",
-        "is_voided",
-        "isVoided",
-        "voided"
-      ]) ?? isVoidedStatus(status),
+      explicitIsVoided ??
+      (isActive === null ? isVoidedStatus(status) : !isActive),
     paymentDate: normalizeCuentiDate(
       findFirstTextValue(record, [
+        "register_date",
+        "registerDate",
         "fecha_pago",
         "fechaPago",
         "paymentDate",
@@ -1963,6 +1867,8 @@ function mapCuentiPaymentSyncRecord(
       ])
     ),
     paymentMethod: findFirstTextValue(record, [
+      "payment_method_name",
+      "paymentMethodName",
       "medio_pago",
       "medioPago",
       "nombre_medio_pago",
@@ -1974,6 +1880,8 @@ function mapCuentiPaymentSyncRecord(
     ]),
     paymentTime: normalizeCuentiTime(
       findFirstTextValue(record, [
+        "register_date",
+        "registerDate",
         "hora",
         "hora_pago",
         "horaPago",
@@ -2019,6 +1927,8 @@ function mapCuentiPaymentSyncRecord(
     ]),
     sourceUpdatedAt: normalizeCuentiTimestamp(
       findFirstTextValue(record, [
+        "register_date",
+        "registerDate",
         "updatedAt",
         "updated_at",
         "fecha_actualizacion",
@@ -2028,6 +1938,27 @@ function mapCuentiPaymentSyncRecord(
     ),
     status
   };
+}
+
+function buildCuentiPaymentFallbackId(record: Record<string, unknown>) {
+  const identity = [
+    findFirstTextValue(record, ["register_date", "registerDate"]),
+    findFirstTextValue(record, ["box_id", "boxId"]),
+    findFirstTextValue(record, ["box_number", "boxNumber"]),
+    findFirstTextValue(record, ["account_number", "accountNumber"]),
+    findFirstTextValue(record, ["boucher", "voucher"]),
+    findFirstTextValue(record, ["receipt_type", "receiptType"]),
+    findFirstTextValue(record, ["customer_id", "customerId"]),
+    findFirstTextValue(record, ["supplier_id", "supplierId"]),
+    findFirstTextValue(record, ["payment_method_id", "paymentMethodId"]),
+    findFirstNumberValue(record, ["total_value", "totalValue", "amount"]),
+    findFirstTextValue(record, ["note", "nota"])
+  ];
+  const hash = createHash("sha256")
+    .update(JSON.stringify(identity))
+    .digest("hex");
+
+  return `payment:${hash}`;
 }
 
 function normalizePaymentDirection(

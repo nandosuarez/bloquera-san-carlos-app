@@ -387,12 +387,20 @@ export async function getManagementAnalytics(input: {
     getDb().query<FinancialSummaryRow>(
       `
         SELECT
-          COALESCE((
+          (
+            COALESCE((
             SELECT SUM(total_amount)
             FROM analytics.operating_expenses
             WHERE expense_on BETWEEN $1::date AND $2::date
               AND is_voided = FALSE
-          ), 0)::text AS operating_expenses,
+            ), 0) + COALESCE((
+              SELECT SUM(amount)
+              FROM analytics.fact_payment
+              WHERE payment_on BETWEEN $1::date AND $2::date
+                AND direction = 'OUT'
+                AND is_voided = FALSE
+            ), 0)
+          )::text AS operating_expenses,
           COALESCE((
             SELECT SUM(amount)
             FROM analytics.fact_payment
@@ -458,13 +466,25 @@ export async function getManagementAnalytics(input: {
     ),
     getDb().query<ExpenseBreakdownRow>(
       `
+        WITH expense_rows AS (
+          SELECT category, total_amount
+          FROM analytics.operating_expenses
+          WHERE expense_on BETWEEN $1::date AND $2::date
+            AND is_voided = FALSE
+          UNION ALL
+          SELECT
+            'EGRESOS CUENTI'::text AS category,
+            amount AS total_amount
+          FROM analytics.fact_payment
+          WHERE payment_on BETWEEN $1::date AND $2::date
+            AND direction = 'OUT'
+            AND is_voided = FALSE
+        )
         SELECT
           category,
           COUNT(*)::text AS records,
           COALESCE(SUM(total_amount), 0)::text AS amount
-        FROM analytics.operating_expenses
-        WHERE expense_on BETWEEN $1::date AND $2::date
-          AND is_voided = FALSE
+        FROM expense_rows
         GROUP BY category
         ORDER BY SUM(total_amount) DESC
       `,
