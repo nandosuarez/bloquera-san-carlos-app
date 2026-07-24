@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ClientRecovery } from "@/components/client-recovery";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +20,10 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <ClientRecovery />
+        {children}
+      </body>
     </html>
   );
 }
