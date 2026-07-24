@@ -39,11 +39,21 @@ export async function GET(request: NextRequest) {
   );
   const row = result.rows[0];
 
-  return NextResponse.json({
+  const diagnostics = {
     documentNumber: row?.document_number ?? null,
     paymentFields: row ? collectPaymentFields(row.payload) : [],
     sourceDate: row?.source_date ?? null
-  });
+  };
+  const content = escapeHtml(JSON.stringify(diagnostics, null, 2));
+
+  return new NextResponse(
+    `<!doctype html><html lang="es"><body><pre>${content}</pre></body></html>`,
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8"
+      }
+    }
+  );
 }
 
 function collectPaymentFields(payload: unknown) {
@@ -102,4 +112,11 @@ function visitValue(
 
     visitValue(nestedValue, fieldPath, fields, depth + 1);
   }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
