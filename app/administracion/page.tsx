@@ -5,6 +5,8 @@ import {
   getCuentiConfigStatus,
   getCuentiReferenceData
 } from "@/lib/cuenti";
+import { getCuentiAnalyticsSyncStatus } from "@/lib/cuenti-analytics-sync";
+import { getCuentiFinancialSyncStatus } from "@/lib/cuenti-financial-sync";
 import { getAdminOverview } from "@/lib/operations";
 import { requireAdminPage } from "@/lib/permissions";
 import { listTransportProviders } from "@/lib/transport-providers";
@@ -21,7 +23,20 @@ const errorMessages: Record<string, string> = {
   duplicate_vehicle: "Ese carro o placa ya existe.",
   duplicate_user: "Ese usuario o correo ya existe.",
   cuenti_connection_failed: "Cuenti rechazo la conexion. Revisa token y empresa.",
+  cuenti_sales_sync_failed:
+    "No fue posible sincronizar las ventas. Revisa el ultimo intento en la bodega.",
+  cuenti_payments_sync_failed:
+    "No fue posible sincronizar los pagos. Revisa el ultimo intento.",
+  cuenti_purchase_sync_running: "Ya hay una sincronizacion de compras en proceso.",
+  cuenti_payment_sync_running: "Ya hay una sincronizacion de pagos en proceso.",
+  cuenti_purchases_sync_failed:
+    "No fue posible cargar las compras indicadas.",
+  cuenti_warehouse_sync_failed:
+    "No fue posible completar toda la sincronizacion de la bodega.",
+  missing_cuenti_purchase_ref: "Escribe al menos un ID de compra de Cuenti.",
+  cuenti_sync_running: "Ya hay una sincronizacion de ventas en proceso.",
   cuenti_unavailable: "No fue posible conectar con Cuenti.",
+  invalid_sync_dates: "El rango de fechas de sincronizacion no es valido.",
   missing_cuenti_branch: "Falta configurar la sucursal de Cuenti.",
   missing_cuenti_company: "Falta configurar el ID de empresa de Cuenti.",
   missing_cuenti_token: "Falta configurar el token API de Cuenti.",
@@ -45,6 +60,10 @@ const successMessages: Record<string, string> = {
   cuenti_connected: "Conexion con Cuenti exitosa.",
   cuenti_customers_synced: "Clientes sincronizados desde Cuenti.",
   cuenti_products_synced: "Productos sincronizados desde Cuenti.",
+  cuenti_sales_synced: "Ventas sincronizadas en la bodega.",
+  cuenti_payments_synced: "Pagos sincronizados en la bodega.",
+  cuenti_purchases_synced: "Compras sincronizadas en la bodega.",
+  cuenti_warehouse_synced: "Bodega gerencial sincronizada.",
   cuenti_stock_synced: "Stock de Cuenti actualizado.",
   customer_saved: "Cliente guardado.",
   formula_saved: "Formula guardada.",
@@ -60,20 +79,30 @@ const successMessages: Record<string, string> = {
 type AdministrationPageProps = {
   searchParams?: {
     branch?: string;
+    backfill?: string;
     branches?: string;
     catalogs?: string;
     checked?: string;
+    complete?: string;
     created?: string;
+    details?: string;
     error?: string;
     failed?: string;
+    from?: string;
+    nextPage?: string;
+    pages?: string;
+    payments?: string;
     raw?: string;
     section?: string;
     skipped?: string;
+    sourceRows?: string;
     stock?: string;
     success?: string;
+    to?: string;
     total?: string;
     tried?: string;
     updated?: string;
+    sales?: string;
   };
 };
 
@@ -81,10 +110,24 @@ export default async function AdministrationPage({
   searchParams
 }: AdministrationPageProps) {
   requireAdminPage();
-  const [overview, vehicles, transportProviders] = await Promise.all([
+  const selectedSection = normalizeSection(searchParams?.section);
+  const [
+    overview,
+    vehicles,
+    transportProviders,
+    cuentiAnalyticsStatus,
+    cuentiFinancialStatus
+  ] =
+    await Promise.all([
     getAdminOverview(),
     listVehicles(),
-    listTransportProviders()
+    listTransportProviders(),
+    selectedSection === "cuenti"
+      ? getCuentiAnalyticsSyncStatus()
+      : Promise.resolve(null),
+    selectedSection === "cuenti"
+      ? getCuentiFinancialSyncStatus()
+      : Promise.resolve(null)
   ]);
   const blockProducts = overview.products
     .filter((product) => product.category === "BLOCK" && product.isActive)
@@ -102,7 +145,6 @@ export default async function AdministrationPage({
     }));
   const errorCode = searchParams?.error ?? null;
   const successCode = searchParams?.success ?? null;
-  const selectedSection = normalizeSection(searchParams?.section);
   const errorMessage = errorCode
     ? errorMessages[errorCode] ?? "Ocurrio un error inesperado."
     : null;
@@ -119,6 +161,14 @@ export default async function AdministrationPage({
         ? buildCuentiProductSyncMessage(searchParams)
       : successCode === "cuenti_stock_synced"
         ? buildCuentiStockSyncMessage(searchParams)
+      : successCode === "cuenti_sales_synced"
+        ? buildCuentiSalesSyncMessage(searchParams)
+      : successCode === "cuenti_payments_synced"
+        ? buildCuentiEntitySyncMessage("Pagos", searchParams)
+      : successCode === "cuenti_purchases_synced"
+        ? buildCuentiEntitySyncMessage("Compras", searchParams)
+      : successCode === "cuenti_warehouse_synced"
+        ? buildCuentiWarehouseSyncMessage(searchParams)
       : successCode
         ? successMessages[successCode] ?? null
         : null;
@@ -179,6 +229,40 @@ export default async function AdministrationPage({
           phone: customer.phone
         }))}
         cuentiConfig={getCuentiConfigStatus()}
+        cuentiFinancialStatus={
+          cuentiFinancialStatus
+            ? {
+                ...cuentiFinancialStatus,
+                payments: {
+                  ...cuentiFinancialStatus.payments,
+                  lastRunAt:
+                    cuentiFinancialStatus.payments.lastRunAt?.toISOString() ?? null
+                },
+                purchases: {
+                  ...cuentiFinancialStatus.purchases,
+                  lastRunAt:
+                    cuentiFinancialStatus.purchases.lastRunAt?.toISOString() ?? null
+                }
+              }
+            : null
+        }
+        cuentiAnalyticsStatus={
+          cuentiAnalyticsStatus
+            ? {
+                ...cuentiAnalyticsStatus,
+                lastRun: cuentiAnalyticsStatus.lastRun
+                  ? {
+                      ...cuentiAnalyticsStatus.lastRun,
+                      finishedAt:
+                        cuentiAnalyticsStatus.lastRun.finishedAt?.toISOString() ??
+                        null,
+                      startedAt:
+                        cuentiAnalyticsStatus.lastRun.startedAt.toISOString()
+                    }
+                  : null
+              }
+            : null
+        }
         cuentiReferenceData={cuentiReferenceData}
         formulas={overview.formulas.map((formula) => ({
           blockName: formula.blockName,
@@ -315,6 +399,46 @@ function buildCuentiStockSyncMessage(
     .join(", ");
 
   return `Stock de Cuenti actualizado. Revisados: ${checked}. Actualizados: ${updated}. Sin stock: ${skipped}. Errores: ${failed}. Sucursal usada: ${branch || tried || "sin dato"}.`;
+}
+
+function buildCuentiSalesSyncMessage(
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  const created = Number(searchParams?.created ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const details = Number(searchParams?.details ?? 0);
+  const dateFrom = searchParams?.from ?? "-";
+  const dateTo = searchParams?.to ?? "-";
+  const windowComplete = searchParams?.complete === "1";
+  const backfillComplete = searchParams?.backfill === "1";
+  const progress = backfillComplete
+    ? "La carga historica ya alcanzo el dia de hoy."
+    : windowComplete
+      ? "El periodo termino; la siguiente ejecucion continuara con el mes siguiente."
+      : `El periodo continua en la pagina ${searchParams?.nextPage ?? "siguiente"}.`;
+
+  return `Bodega actualizada del ${dateFrom} al ${dateTo}. Facturas nuevas: ${created}. Actualizadas: ${updated}. Lineas: ${details}. ${progress}`;
+}
+
+function buildCuentiEntitySyncMessage(
+  entityLabel: string,
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  const created = Number(searchParams?.created ?? 0);
+  const updated = Number(searchParams?.updated ?? 0);
+  const skipped = Number(searchParams?.skipped ?? 0);
+
+  return `${entityLabel} sincronizados. Nuevos: ${created}. Actualizados: ${updated}. Omitidos: ${skipped}.`;
+}
+
+function buildCuentiWarehouseSyncMessage(
+  searchParams?: AdministrationPageProps["searchParams"]
+) {
+  return `Bodega gerencial actualizada. Ventas: ${Number(
+    searchParams?.sales ?? 0
+  )}. Pagos: ${Number(searchParams?.payments ?? 0)}. Inventario: ${Number(
+    searchParams?.stock ?? 0
+  )} productos.`;
 }
 
 async function loadCuentiReferenceData() {

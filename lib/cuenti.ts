@@ -16,6 +16,8 @@ type CuentiCredentials = {
 };
 
 export type CuentiConfigStatus = {
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
   baseUrl: string;
   branchId: string | null;
   companyId: string;
@@ -126,6 +128,87 @@ export type CuentiSalesListResult = {
   sales: CuentiSaleSummary[];
 };
 
+export type CuentiInvoiceSyncItem = CuentiSaleItem & {
+  costAmount: number | null;
+  discountAmount: number | null;
+  externalLineId: string | null;
+  grossAmount: number | null;
+  grossProfit: number | null;
+  lineNumber: number | null;
+  netAmount: number | null;
+  rawPayload: unknown;
+  taxAmount: number | null;
+  totalAmount: number | null;
+  unitCost: number | null;
+  unitPrice: number | null;
+};
+
+export type CuentiInvoiceSyncDetail = CuentiSaleSummary & {
+  balanceDue: number | null;
+  costAmount: number | null;
+  discountAmount: number | null;
+  grossAmount: number | null;
+  grossProfit: number | null;
+  isVoided: boolean;
+  items: CuentiInvoiceSyncItem[];
+  netAmount: number | null;
+  paidAmount: number | null;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  rawPayload: unknown;
+  returnAmount: number | null;
+  saleTime: string | null;
+  sourceUpdatedAt: string | null;
+  taxAmount: number | null;
+};
+
+export type CuentiInvoiceSyncRecord = {
+  rawPayload: unknown;
+  summary: CuentiSaleSummary;
+};
+
+export type CuentiInvoiceSyncPage = {
+  branchId: string;
+  page: number;
+  pageSize: number;
+  rawItemsSeen: number;
+  records: CuentiInvoiceSyncRecord[];
+  total: number | null;
+  totalPages: number | null;
+};
+
+export type CuentiPaymentDirection = "IN" | "OUT" | "UNKNOWN";
+
+export type CuentiPaymentSyncRecord = {
+  amount: number | null;
+  bankName: string | null;
+  counterpartyExternalId: string | null;
+  counterpartyName: string | null;
+  direction: CuentiPaymentDirection;
+  documentNumber: string | null;
+  externalId: string;
+  isVoided: boolean;
+  paymentDate: string | null;
+  paymentMethod: string | null;
+  paymentTime: string | null;
+  rawPayload: unknown;
+  relatedDocumentId: string | null;
+  relatedDocumentNumber: string | null;
+  relatedDocumentType: string | null;
+  sourceUpdatedAt: string | null;
+  status: string | null;
+};
+
+export type CuentiPaymentSyncPage = {
+  branchId: string;
+  page: number;
+  pageSize: number;
+  rawItemsSeen: number;
+  records: CuentiPaymentSyncRecord[];
+  total: number | null;
+  totalPages: number | null;
+};
+
 export class CuentiIntegrationError extends Error {
   code: string;
 
@@ -160,6 +243,11 @@ export function getCuentiConfigStatus(): CuentiConfigStatus {
     .map(([key]) => key);
 
   return {
+    autoSyncEnabled: process.env.CUENTI_AUTO_SYNC_ENABLED === "true",
+    autoSyncIntervalMinutes: Math.max(
+      15,
+      Number(process.env.CUENTI_AUTO_SYNC_INTERVAL_MINUTES ?? 60) || 60
+    ),
     baseUrl,
     branchId,
     companyId,
@@ -509,6 +597,204 @@ export async function getCuentiSaleDetail(
   }
 
   return bestResult?.sale ?? null;
+}
+
+export async function getCuentiInvoiceSyncPage(input: {
+  dateFrom: string;
+  dateTo: string;
+  page: number;
+  pageSize?: number;
+}): Promise<CuentiInvoiceSyncPage> {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const page = Math.max(1, normalizePositiveInteger(input.page, 1));
+  const pageSize = Math.min(
+    200,
+    Math.max(1, normalizePositiveInteger(input.pageSize, 100))
+  );
+  const payload = await requestCuentiData(credentials, "invoices", {
+    branchId: status.branchId,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+  const rawItems = extractResponseItems(payload);
+  const records = rawItems
+    .map((rawPayload) => {
+      const summary = mapCuentiSaleSummary(rawPayload, status.branchId, "invoice");
+
+      return summary ? { rawPayload, summary } : null;
+    })
+    .filter((record): record is CuentiInvoiceSyncRecord => Boolean(record));
+  const pagination = extractCuentiPagination(payload);
+
+  return {
+    branchId: status.branchId,
+    page: pagination.page ?? page,
+    pageSize: pagination.pageSize ?? pageSize,
+    rawItemsSeen: rawItems.length,
+    records,
+    total: pagination.total,
+    totalPages: pagination.totalPages
+  };
+}
+
+export async function getCuentiInvoiceSyncDetail(
+  ref: string
+): Promise<CuentiInvoiceSyncDetail | null> {
+  const normalizedRef = normalizeOptionalText(ref);
+  const status = getCuentiConfigStatus();
+
+  if (!normalizedRef) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_sale_ref",
+      "Falta la referencia de la factura de Cuenti."
+    );
+  }
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const payload = await requestCuentiData(credentials, "invoice", {
+    branchId: status.branchId,
+    ref: normalizedRef
+  });
+
+  return mapCuentiInvoiceSyncDetail(
+    payload,
+    status.branchId,
+    normalizedRef
+  );
+}
+
+export async function getCuentiPaymentSyncPage(input: {
+  dateFrom: string;
+  dateTo: string;
+  page: number;
+  pageSize?: number;
+}): Promise<CuentiPaymentSyncPage> {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const page = Math.max(1, normalizePositiveInteger(input.page, 1));
+  const pageSize = Math.min(
+    200,
+    Math.max(1, normalizePositiveInteger(input.pageSize, 100))
+  );
+  const payload = await requestCuentiData(credentials, "payments", {
+    branchId: status.branchId,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+  const rawItems = extractResponseItems(payload);
+  const records = rawItems
+    .map((rawPayload) =>
+      mapCuentiPaymentSyncRecord(rawPayload, null, rawPayload)
+    )
+    .filter((record): record is CuentiPaymentSyncRecord => Boolean(record));
+  const pagination = extractCuentiPagination(payload);
+
+  return {
+    branchId: status.branchId,
+    page: pagination.page ?? page,
+    pageSize: pagination.pageSize ?? pageSize,
+    rawItemsSeen: rawItems.length,
+    records,
+    total: pagination.total,
+    totalPages: pagination.totalPages
+  };
+}
+
+export async function getCuentiPaymentSyncDetail(
+  ref: string
+): Promise<CuentiPaymentSyncRecord | null> {
+  const normalizedRef = normalizeOptionalText(ref);
+  const status = getCuentiConfigStatus();
+
+  if (!normalizedRef) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_payment_ref",
+      "Falta la referencia del pago de Cuenti."
+    );
+  }
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const payload = await requestCuentiData(credentials, "payment", {
+    branchId: status.branchId,
+    ref: normalizedRef
+  });
+
+  return mapCuentiPaymentSyncRecord(payload, normalizedRef, payload);
+}
+
+export async function getCuentiPurchaseSyncDetail(
+  ref: string
+): Promise<CuentiInvoiceSyncDetail | null> {
+  const normalizedRef = normalizeOptionalText(ref);
+  const status = getCuentiConfigStatus();
+
+  if (!normalizedRef) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_purchase_ref",
+      "Falta la referencia de la compra de Cuenti."
+    );
+  }
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const payload = await requestCuentiData(credentials, "purchase", {
+    branchId: status.branchId,
+    ref: normalizedRef
+  });
+  const detail = mapCuentiInvoiceSyncDetail(
+    payload,
+    status.branchId,
+    normalizedRef
+  );
+
+  return detail
+    ? {
+        ...detail,
+        cuentiSaleId: normalizedRef,
+        rawPayload: payload
+      }
+    : null;
 }
 
 function scoreCuentiSaleDetail(sale: CuentiSaleDetail | null) {
@@ -869,6 +1155,31 @@ function extractResponseItems(payload: CuentiRawResponse) {
   return extractItemsFromUnknown(payload) ?? [];
 }
 
+function extractCuentiPagination(payload: CuentiRawResponse) {
+  const data = getCaseInsensitiveValue(payload, "data");
+  const pagination =
+    (isRecord(data) && getCaseInsensitiveValue(data, "pagination")) ??
+    getCaseInsensitiveValue(payload, "pagination");
+  const record = isRecord(pagination) ? pagination : {};
+
+  return {
+    page: normalizeIntegerOrNull(
+      getCaseInsensitiveValue(record, "page")
+    ),
+    pageSize: normalizeIntegerOrNull(
+      getCaseInsensitiveValue(record, "pageSize") ??
+        getCaseInsensitiveValue(record, "page_size")
+    ),
+    total: normalizeIntegerOrNull(
+      getCaseInsensitiveValue(record, "total")
+    ),
+    totalPages: normalizeIntegerOrNull(
+      getCaseInsensitiveValue(record, "totalPages") ??
+        getCaseInsensitiveValue(record, "total_pages")
+    )
+  };
+}
+
 function extractItemsFromUnknown(value: unknown, depth = 0): unknown[] | null {
   if (Array.isArray(value)) {
     return value;
@@ -991,6 +1302,11 @@ function mapCuentiSaleSummary(
     findFirstTextValue(record, [
       "nombre_tercero",
       "tercero",
+      "nombre_proveedor",
+      "nombreProveedor",
+      "proveedor",
+      "supplierName",
+      "supplier_name",
       "customerName",
       "customer_name",
       "razon_social_cliente",
@@ -1039,7 +1355,11 @@ function mapCuentiSaleSummary(
       "id_customer",
       "idTercero",
       "tercero_id",
-      "id_tercero"
+      "id_tercero",
+      "id_proveedor",
+      "idProveedor",
+      "supplierId",
+      "supplier_id"
     ]),
     cuentiSaleId: cuentiSaleId ?? documentNumber ?? `${customerName}-${saleDate ?? ""}`,
     customerAddress: findFirstTextValue(record, [
@@ -1122,6 +1442,525 @@ function mapCuentiSaleDetail(
     cuentiSaleId: summary.cuentiSaleId || fallbackRef,
     source,
     items
+  };
+}
+
+function mapCuentiInvoiceSyncDetail(
+  payload: CuentiRawResponse,
+  branchId: string,
+  fallbackRef: string
+): CuentiInvoiceSyncDetail | null {
+  const detailSource = getCaseInsensitiveValue(payload, "data") ?? payload;
+  const headerSource = resolveCuentiSaleHeader(detailSource) ?? payload;
+  const summary =
+    mapCuentiSaleSummary(headerSource, branchId, "invoice") ??
+    mapCuentiSaleSummary(payload, branchId, "invoice");
+
+  if (!summary) {
+    return null;
+  }
+
+  const headerRecord = isRecord(headerSource)
+    ? flattenRecord(headerSource)
+    : flattenRecord(payload);
+  const items = extractCuentiSaleItemCandidates(detailSource)
+    .map(mapCuentiInvoiceSyncItem)
+    .filter((item): item is CuentiInvoiceSyncItem => Boolean(item));
+  const itemCostAmount = sumKnownAmounts(items.map((item) => item.costAmount));
+  const itemNetAmount = sumKnownAmounts(items.map((item) => item.netAmount));
+  const itemTaxAmount = sumKnownAmounts(items.map((item) => item.taxAmount));
+  const itemTotalAmount = sumKnownAmounts(items.map((item) => item.totalAmount));
+  const taxAmount = findFirstNumberValue(headerRecord, [
+    "total_impuestos",
+    "totalImpuestos",
+    "tax_amount",
+    "taxAmount",
+    "impuestos",
+    "iva",
+    "total_iva"
+  ]) ?? itemTaxAmount;
+  const grossAmount =
+    findFirstNumberValue(headerRecord, [
+      "total_neto",
+      "totalNeto",
+      "total",
+      "valor_total",
+      "valorTotal",
+      "total_factura",
+      "totalFactura",
+      "grandTotal",
+      "total_amount"
+    ]) ??
+    summary.totalAmount ??
+    itemTotalAmount;
+  const netAmount =
+    findFirstNumberValue(headerRecord, [
+      "total_sin_impuestos",
+      "totalSinImpuestos",
+      "subtotal_sin_impuestos",
+      "subtotalSinImpuestos",
+      "net_amount",
+      "netAmount",
+      "subtotal"
+    ]) ??
+    itemNetAmount ??
+    subtractKnownAmounts(grossAmount, taxAmount);
+  const costAmount =
+    findFirstNumberValue(headerRecord, [
+      "costo_total",
+      "costoTotal",
+      "total_costo",
+      "totalCosto",
+      "cost_amount",
+      "costAmount",
+      "total_cost"
+    ]) ?? itemCostAmount;
+  const grossProfit =
+    findFirstNumberValue(headerRecord, [
+      "utilidad",
+      "utilidad_total",
+      "utilidadTotal",
+      "gross_profit",
+      "grossProfit",
+      "profit"
+    ]) ?? subtractKnownAmounts(netAmount, costAmount);
+
+  return {
+    ...summary,
+    balanceDue: findFirstNumberValue(headerRecord, [
+      "total_pendiente_pago",
+      "totalPendientePago",
+      "saldo_pendiente",
+      "saldoPendiente",
+      "balance_due",
+      "balanceDue"
+    ]),
+    costAmount,
+    cuentiSaleId: summary.cuentiSaleId || fallbackRef,
+    discountAmount: findFirstNumberValue(headerRecord, [
+      "total_descuento",
+      "totalDescuento",
+      "descuento",
+      "discount_amount",
+      "discountAmount"
+    ]),
+    grossAmount,
+    grossProfit,
+    isVoided:
+      findFirstBooleanValue(headerRecord, [
+        "es_nula",
+        "esNula",
+        "anulada",
+        "is_voided",
+        "isVoided",
+        "voided"
+      ]) ?? isVoidedStatus(summary.status),
+    items,
+    netAmount,
+    paidAmount: findFirstNumberValue(headerRecord, [
+      "total_abono",
+      "total_Abono",
+      "totalAbono",
+      "valor_pagado",
+      "valorPagado",
+      "paid_amount",
+      "paidAmount"
+    ]),
+    paymentMethod: findFirstTextValue(headerRecord, [
+      "medio_pago",
+      "medioPago",
+      "payment_method",
+      "paymentMethod",
+      "forma_pago",
+      "formaPago"
+    ]),
+    paymentStatus: findFirstTextValue(headerRecord, [
+      "estado_pago",
+      "estadoPago",
+      "payment_status",
+      "paymentStatus"
+    ]),
+    rawPayload: payload,
+    returnAmount: findFirstNumberValue(headerRecord, [
+      "total_devoluciones",
+      "totalDevoluciones",
+      "devoluciones",
+      "return_amount",
+      "returnAmount"
+    ]),
+    saleTime: normalizeCuentiTime(
+      findFirstTextValue(headerRecord, [
+        "hora",
+        "hora_factura",
+        "horaFactura",
+        "sale_time",
+        "saleTime",
+        "time"
+      ])
+    ),
+    sourceUpdatedAt: normalizeCuentiTimestamp(
+      findFirstTextValue(headerRecord, [
+        "updatedAt",
+        "updated_at",
+        "fecha_actualizacion",
+        "fechaActualizacion",
+        "date_updated",
+        "fecha_generacion",
+        "fechaGeneracion"
+      ])
+    ),
+    taxAmount
+  };
+}
+
+function mapCuentiPaymentSyncRecord(
+  value: unknown,
+  fallbackRef: string | null,
+  rawPayload: unknown
+): CuentiPaymentSyncRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const detailSource = getCaseInsensitiveValue(value, "data") ?? value;
+  const record = isRecord(detailSource)
+    ? flattenRecord(detailSource)
+    : flattenRecord(value);
+  const externalId =
+    findFirstTextValue(record, [
+      "id_pago",
+      "idPago",
+      "paymentId",
+      "payment_id",
+      "id_transaccion",
+      "idTransaccion",
+      "transactionId",
+      "transaction_id",
+      "id"
+    ]) ?? fallbackRef;
+
+  if (!externalId) {
+    return null;
+  }
+
+  const directionText = findFirstTextValue(record, [
+    "naturaleza",
+    "direction",
+    "tipo_movimiento",
+    "tipoMovimiento",
+    "movement_type",
+    "movementType",
+    "tipo_pago",
+    "tipoPago",
+    "payment_type",
+    "paymentType",
+    "tipo_documento",
+    "tipoDocumento"
+  ]);
+  const amount = findFirstNumberValue(record, [
+    "valor_pago",
+    "valorPago",
+    "payment_amount",
+    "paymentAmount",
+    "valor",
+    "amount",
+    "total",
+    "monto"
+  ]);
+  const status = findFirstTextValue(record, [
+    "estado",
+    "status",
+    "state",
+    "estado_pago",
+    "estadoPago"
+  ]);
+
+  return {
+    amount: amount === null ? null : Math.abs(amount),
+    bankName: findFirstTextValue(record, [
+      "nombre_banco",
+      "nombreBanco",
+      "banco",
+      "bank_name",
+      "bankName",
+      "bank"
+    ]),
+    counterpartyExternalId: findFirstTextValue(record, [
+      "id_tercero",
+      "idTercero",
+      "id_cliente",
+      "idCliente",
+      "id_proveedor",
+      "idProveedor",
+      "counterpartyId",
+      "customerId",
+      "supplierId"
+    ]),
+    counterpartyName: findFirstTextValue(record, [
+      "nombre_tercero",
+      "nombreTercero",
+      "tercero",
+      "nombre_cliente",
+      "nombreCliente",
+      "cliente",
+      "nombre_proveedor",
+      "nombreProveedor",
+      "proveedor",
+      "counterpartyName",
+      "customerName",
+      "supplierName"
+    ]),
+    direction: normalizePaymentDirection(directionText, amount),
+    documentNumber: findFirstTextValue(record, [
+      "numero_pago",
+      "numeroPago",
+      "paymentNumber",
+      "payment_number",
+      "consecutivo",
+      "numero",
+      "documentNumber"
+    ]),
+    externalId,
+    isVoided:
+      findFirstBooleanValue(record, [
+        "es_nulo",
+        "esNulo",
+        "anulado",
+        "anulada",
+        "is_voided",
+        "isVoided",
+        "voided"
+      ]) ?? isVoidedStatus(status),
+    paymentDate: normalizeCuentiDate(
+      findFirstTextValue(record, [
+        "fecha_pago",
+        "fechaPago",
+        "paymentDate",
+        "payment_date",
+        "fecha",
+        "date_register",
+        "fecha_registro",
+        "fechaRegistro",
+        "createdAt",
+        "created_at",
+        "date"
+      ])
+    ),
+    paymentMethod: findFirstTextValue(record, [
+      "medio_pago",
+      "medioPago",
+      "nombre_medio_pago",
+      "nombreMedioPago",
+      "forma_pago",
+      "formaPago",
+      "payment_method",
+      "paymentMethod"
+    ]),
+    paymentTime: normalizeCuentiTime(
+      findFirstTextValue(record, [
+        "hora",
+        "hora_pago",
+        "horaPago",
+        "payment_time",
+        "paymentTime",
+        "time"
+      ])
+    ),
+    rawPayload,
+    relatedDocumentId: findFirstTextValue(record, [
+      "id_documento",
+      "idDocumento",
+      "documentId",
+      "document_id",
+      "id_factura",
+      "idFactura",
+      "invoiceId",
+      "invoice_id",
+      "id_compra",
+      "idCompra",
+      "purchaseId",
+      "purchase_id"
+    ]),
+    relatedDocumentNumber: findFirstTextValue(record, [
+      "numero_documento",
+      "numeroDocumento",
+      "documentNumber",
+      "document_number",
+      "numero_factura",
+      "numeroFactura",
+      "invoiceNumber",
+      "numero_compra",
+      "numeroCompra",
+      "purchaseNumber"
+    ]),
+    relatedDocumentType: findFirstTextValue(record, [
+      "tipo_documento",
+      "tipoDocumento",
+      "documentType",
+      "document_type",
+      "nombre_tipo_documento",
+      "nombreTipoDocumento"
+    ]),
+    sourceUpdatedAt: normalizeCuentiTimestamp(
+      findFirstTextValue(record, [
+        "updatedAt",
+        "updated_at",
+        "fecha_actualizacion",
+        "fechaActualizacion",
+        "date_updated"
+      ])
+    ),
+    status
+  };
+}
+
+function normalizePaymentDirection(
+  value: string | null,
+  amount: number | null
+): CuentiPaymentDirection {
+  const normalized = normalizeFieldKey(value ?? "");
+  const incomingTerms = [
+    "ingreso",
+    "entrada",
+    "recibido",
+    "recaudo",
+    "cobro",
+    "income"
+  ];
+  const outgoingTerms = [
+    "egreso",
+    "salida",
+    "proveedor",
+    "compra",
+    "gasto",
+    "expense"
+  ];
+
+  if (
+    normalized === "in" ||
+    incomingTerms.some((term) => normalized === term || normalized.includes(term))
+  ) {
+    return "IN";
+  }
+
+  if (
+    normalized === "out" ||
+    outgoingTerms.some((term) => normalized === term || normalized.includes(term))
+  ) {
+    return "OUT";
+  }
+
+  if (amount !== null && amount < 0) {
+    return "OUT";
+  }
+
+  return "UNKNOWN";
+}
+
+function mapCuentiInvoiceSyncItem(value: unknown): CuentiInvoiceSyncItem | null {
+  const baseItem = mapCuentiSaleItem(value);
+
+  if (!baseItem || !isRecord(value)) {
+    return null;
+  }
+
+  const record = flattenRecord(value);
+  const quantity = baseItem.quantity;
+  const explicitUnitCost = findFirstNumberValue(record, [
+    "costo_unitario",
+    "costoUnitario",
+    "unit_cost",
+    "unitCost",
+    "cost"
+  ]);
+  const explicitCostAmount = findFirstNumberValue(record, [
+    "costo_total",
+    "costoTotal",
+    "total_costo",
+    "totalCosto",
+    "total_cost",
+    "cost_amount",
+    "costAmount"
+  ]);
+  const costAmount =
+    explicitCostAmount ??
+    (explicitUnitCost !== null ? explicitUnitCost * quantity : null);
+  const unitCost =
+    explicitUnitCost ??
+    (costAmount !== null && quantity !== 0 ? costAmount / quantity : null);
+  const unitPrice = findFirstNumberValue(record, [
+    "precio_unitario",
+    "precioUnitario",
+    "unit_price",
+    "unitPrice",
+    "real_price",
+    "realPrice",
+    "price"
+  ]);
+  const taxAmount = findFirstNumberValue(record, [
+    "valor_impuesto",
+    "valorImpuesto",
+    "total_impuestos",
+    "totalImpuestos",
+    "tax_amount",
+    "taxAmount",
+    "tax"
+  ]);
+  const totalAmount =
+    findFirstNumberValue(record, [
+      "total_neto",
+      "totalNeto",
+      "total",
+      "valor_total",
+      "valorTotal",
+      "total_amount",
+      "totalAmount"
+    ]) ?? (unitPrice !== null ? unitPrice * quantity : null);
+  const netAmount =
+    findFirstNumberValue(record, [
+      "total_sin_impuestos",
+      "totalSinImpuestos",
+      "net_amount",
+      "netAmount",
+      "subtotal",
+      "total_before_tax",
+      "totalBeforeTax"
+    ]) ?? subtractKnownAmounts(totalAmount, taxAmount);
+  const grossProfit = subtractKnownAmounts(netAmount, costAmount);
+
+  return {
+    ...baseItem,
+    costAmount,
+    discountAmount: findFirstNumberValue(record, [
+      "descuento",
+      "discount",
+      "discount_amount",
+      "discountAmount"
+    ]),
+    externalLineId: findFirstTextValue(record, [
+      "id_detalle",
+      "idDetalle",
+      "detail_id",
+      "detailId",
+      "line_id",
+      "lineId",
+      "id"
+    ]),
+    grossAmount: totalAmount,
+    grossProfit,
+    lineNumber: findFirstNumberValue(record, [
+      "linea",
+      "linea_numero",
+      "lineNumber",
+      "line_number",
+      "item"
+    ]),
+    netAmount,
+    rawPayload: value,
+    taxAmount,
+    totalAmount,
+    unitCost,
+    unitPrice
   };
 }
 
@@ -1777,6 +2616,33 @@ function findFirstNumberValue(record: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function findFirstBooleanValue(
+  record: Record<string, unknown>,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const directValue = normalizeUnknownBoolean(record[key]);
+
+    if (directValue !== null) {
+      return directValue;
+    }
+
+    const caseInsensitiveKey = Object.keys(record).find(
+      (recordKey) =>
+        recordKey.toLocaleLowerCase("es-CO") === key.toLocaleLowerCase("es-CO")
+    );
+    const caseInsensitiveValue = caseInsensitiveKey
+      ? normalizeUnknownBoolean(record[caseInsensitiveKey])
+      : null;
+
+    if (caseInsensitiveValue !== null) {
+      return caseInsensitiveValue;
+    }
+  }
+
+  return null;
+}
+
 function normalizeUnknownText(value: unknown) {
   if (value === null || value === undefined) {
     return null;
@@ -1826,6 +2692,105 @@ function normalizeUnknownNumber(value: unknown) {
   const parsed = Number(numericText);
 
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeUnknownBoolean(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLocaleLowerCase("es-CO");
+
+  if (["1", "true", "si", "sí", "yes", "anulada", "anulado"].includes(normalized)) {
+    return true;
+  }
+
+  if (["0", "false", "no", "activa", "activo"].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
+
+function normalizeIntegerOrNull(value: unknown) {
+  const normalized = normalizeUnknownNumber(value);
+
+  return normalized !== null && Number.isFinite(normalized)
+    ? Math.max(0, Math.trunc(normalized))
+    : null;
+}
+
+function sumKnownAmounts(values: Array<number | null>) {
+  const knownValues = values.filter((value): value is number => value !== null);
+
+  return knownValues.length > 0
+    ? knownValues.reduce((sum, value) => sum + value, 0)
+    : null;
+}
+
+function subtractKnownAmounts(
+  minuend: number | null,
+  subtrahend: number | null
+) {
+  return minuend !== null && subtrahend !== null
+    ? minuend - subtrahend
+    : null;
+}
+
+function isVoidedStatus(value: string | null) {
+  const normalized = value
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO");
+
+  return Boolean(
+    normalized &&
+      ["anulada", "anulado", "cancelada", "cancelado", "voided"].some((term) =>
+        normalized.includes(term)
+      )
+  );
+}
+
+function normalizeCuentiTime(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.trim().match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3] ?? 0);
+
+  if (hour > 23 || minute > 59 || second > 59) {
+    return null;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+}
+
+function normalizeCuentiTimestamp(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function buildReferenceDetail(

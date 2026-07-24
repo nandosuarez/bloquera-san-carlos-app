@@ -543,6 +543,49 @@ BEFORE UPDATE ON transport_cost
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE IF NOT EXISTS operating_expense (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  expense_on DATE NOT NULL,
+  category VARCHAR(30) NOT NULL,
+  concept VARCHAR(180) NOT NULL,
+  provider_id UUID NULL REFERENCES transport_provider(id),
+  provider_name VARCHAR(160) NULL,
+  total_amount NUMERIC(16, 2) NOT NULL,
+  payment_method VARCHAR(120) NULL,
+  notes TEXT NULL,
+  recorded_by_user_id UUID NULL REFERENCES app_user(id),
+  is_voided BOOLEAN NOT NULL DEFAULT FALSE,
+  voided_at TIMESTAMPTZ NULL,
+  voided_by_user_id UUID NULL REFERENCES app_user(id),
+  void_reason TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT operating_expense_category_check
+    CHECK (
+      category IN (
+        'SERVICES',
+        'RENT',
+        'PAYROLL',
+        'SUPPLIES',
+        'TAX',
+        'SECURITY',
+        'OTHER'
+      )
+    ),
+  CONSTRAINT operating_expense_amount_check
+    CHECK (total_amount > 0)
+);
+
+CREATE INDEX IF NOT EXISTS operating_expense_date_idx
+  ON operating_expense (expense_on DESC, created_at DESC);
+
+DROP TRIGGER IF EXISTS trg_operating_expense_updated_at ON operating_expense;
+
+CREATE TRIGGER trg_operating_expense_updated_at
+BEFORE UPDATE ON operating_expense
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 CREATE TABLE IF NOT EXISTS delivery_service (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   service_on DATE NOT NULL,
@@ -800,3 +843,470 @@ CREATE TRIGGER trg_cement_calculator_product_updated_at
 BEFORE UPDATE ON cement_calculator_product_config
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+CREATE SCHEMA IF NOT EXISTS integration;
+CREATE SCHEMA IF NOT EXISTS analytics;
+
+CREATE TABLE IF NOT EXISTS integration.sync_state (
+  source_system VARCHAR(40) NOT NULL,
+  entity_type VARCHAR(60) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  last_successful_from DATE NULL,
+  last_successful_to DATE NULL,
+  last_successful_at TIMESTAMPTZ NULL,
+  last_run_id UUID NULL,
+  active_date_from DATE NULL,
+  active_date_to DATE NULL,
+  next_page INTEGER NOT NULL DEFAULT 1,
+  backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (source_system, entity_type, branch_id),
+  CONSTRAINT integration_sync_state_page_check
+    CHECK (next_page > 0)
+);
+
+CREATE TABLE IF NOT EXISTS integration.sync_run (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  entity_type VARCHAR(60) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  mode VARCHAR(20) NOT NULL DEFAULT 'INCREMENTAL',
+  date_from DATE NOT NULL,
+  date_to DATE NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+  pages_processed INTEGER NOT NULL DEFAULT 0,
+  source_rows INTEGER NOT NULL DEFAULT 0,
+  records_created INTEGER NOT NULL DEFAULT 0,
+  records_updated INTEGER NOT NULL DEFAULT 0,
+  records_skipped INTEGER NOT NULL DEFAULT 0,
+  detail_rows INTEGER NOT NULL DEFAULT 0,
+  window_complete BOOLEAN NOT NULL DEFAULT FALSE,
+  error_message TEXT NULL,
+  initiated_by_user_id UUID NULL REFERENCES public.app_user(id),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ NULL,
+  CONSTRAINT integration_sync_run_mode_check
+    CHECK (mode IN ('INITIAL', 'INCREMENTAL', 'MANUAL')),
+  CONSTRAINT integration_sync_run_status_check
+    CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED')),
+  CONSTRAINT integration_sync_run_dates_check
+    CHECK (date_to >= date_from),
+  CONSTRAINT integration_sync_run_counts_check
+    CHECK (
+      pages_processed >= 0
+      AND source_rows >= 0
+      AND records_created >= 0
+      AND records_updated >= 0
+      AND records_skipped >= 0
+      AND detail_rows >= 0
+    )
+);
+
+CREATE INDEX IF NOT EXISTS integration_sync_run_started_idx
+  ON integration.sync_run (started_at DESC);
+
+CREATE INDEX IF NOT EXISTS integration_sync_run_entity_idx
+  ON integration.sync_run (source_system, entity_type, branch_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS integration.source_record (
+  source_system VARCHAR(40) NOT NULL,
+  entity_type VARCHAR(60) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  external_id VARCHAR(160) NOT NULL,
+  document_number VARCHAR(120) NULL,
+  source_date DATE NULL,
+  payload JSONB NOT NULL,
+  payload_hash CHAR(64) NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  PRIMARY KEY (source_system, entity_type, branch_id, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS integration_source_record_date_idx
+  ON integration.source_record (entity_type, source_date DESC);
+
+CREATE TABLE IF NOT EXISTS analytics.dim_date (
+  date_key DATE PRIMARY KEY,
+  year_number SMALLINT NOT NULL,
+  quarter_number SMALLINT NOT NULL,
+  month_number SMALLINT NOT NULL,
+  day_number SMALLINT NOT NULL,
+  iso_week_number SMALLINT NOT NULL,
+  day_of_week_number SMALLINT NOT NULL,
+  is_weekend BOOLEAN NOT NULL
+);
+
+INSERT INTO analytics.dim_date (
+  date_key,
+  year_number,
+  quarter_number,
+  month_number,
+  day_number,
+  iso_week_number,
+  day_of_week_number,
+  is_weekend
+)
+SELECT
+  calendar_day::date,
+  EXTRACT(YEAR FROM calendar_day)::smallint,
+  EXTRACT(QUARTER FROM calendar_day)::smallint,
+  EXTRACT(MONTH FROM calendar_day)::smallint,
+  EXTRACT(DAY FROM calendar_day)::smallint,
+  EXTRACT(WEEK FROM calendar_day)::smallint,
+  EXTRACT(ISODOW FROM calendar_day)::smallint,
+  EXTRACT(ISODOW FROM calendar_day) IN (6, 7)
+FROM generate_series(
+  DATE '2020-01-01',
+  DATE '2035-12-31',
+  INTERVAL '1 day'
+) AS calendar_day
+ON CONFLICT (date_key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS analytics.dim_customer (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  customer_key VARCHAR(200) NOT NULL,
+  external_id VARCHAR(160) NULL,
+  local_customer_id UUID NULL REFERENCES public.customer(id),
+  identification VARCHAR(80) NULL,
+  name VARCHAR(200) NOT NULL,
+  phone VARCHAR(80) NULL,
+  address TEXT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source_system, branch_id, customer_key)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_dim_customer_external_idx
+  ON analytics.dim_customer (source_system, branch_id, external_id);
+
+CREATE TABLE IF NOT EXISTS analytics.dim_product (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  product_key VARCHAR(200) NOT NULL,
+  external_id VARCHAR(160) NULL,
+  local_product_id UUID NULL REFERENCES public.product(id),
+  sku VARCHAR(120) NULL,
+  name VARCHAR(240) NOT NULL,
+  unit_name VARCHAR(80) NULL,
+  category VARCHAR(120) NULL,
+  product_line_id UUID NULL REFERENCES public.product_line(id),
+  product_line_name VARCHAR(120) NULL,
+  current_sale_price NUMERIC(16, 4) NULL,
+  current_standard_cost NUMERIC(16, 4) NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source_system, branch_id, product_key)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_dim_product_external_idx
+  ON analytics.dim_product (source_system, branch_id, external_id);
+
+CREATE INDEX IF NOT EXISTS analytics_dim_product_name_idx
+  ON analytics.dim_product (LOWER(name));
+
+CREATE TABLE IF NOT EXISTS analytics.dim_supplier (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  supplier_key VARCHAR(200) NOT NULL,
+  external_id VARCHAR(160) NULL,
+  identification VARCHAR(80) NULL,
+  name VARCHAR(200) NOT NULL,
+  phone VARCHAR(80) NULL,
+  address TEXT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source_system, branch_id, supplier_key)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_dim_supplier_external_idx
+  ON analytics.dim_supplier (source_system, branch_id, external_id);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_sale (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  external_id VARCHAR(160) NOT NULL,
+  document_number VARCHAR(120) NULL,
+  customer_id UUID NULL REFERENCES analytics.dim_customer(id),
+  sale_on DATE NOT NULL REFERENCES analytics.dim_date(date_key),
+  sale_time TIME NULL,
+  status VARCHAR(80) NULL,
+  payment_status VARCHAR(80) NULL,
+  payment_method VARCHAR(120) NULL,
+  gross_amount NUMERIC(18, 4) NULL,
+  discount_amount NUMERIC(18, 4) NULL,
+  return_amount NUMERIC(18, 4) NULL,
+  tax_amount NUMERIC(18, 4) NULL,
+  net_amount NUMERIC(18, 4) NULL,
+  cost_amount NUMERIC(18, 4) NULL,
+  gross_profit NUMERIC(18, 4) NULL,
+  paid_amount NUMERIC(18, 4) NULL,
+  balance_due NUMERIC(18, 4) NULL,
+  is_voided BOOLEAN NOT NULL DEFAULT FALSE,
+  has_complete_cost BOOLEAN NOT NULL DEFAULT FALSE,
+  source_updated_at TIMESTAMPTZ NULL,
+  first_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  UNIQUE (source_system, branch_id, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_sale_date_idx
+  ON analytics.fact_sale (sale_on DESC, document_number);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_sale_customer_idx
+  ON analytics.fact_sale (customer_id, sale_on DESC);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_sale_item (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sale_id UUID NOT NULL REFERENCES analytics.fact_sale(id) ON DELETE CASCADE,
+  line_key VARCHAR(200) NOT NULL,
+  external_line_id VARCHAR(160) NULL,
+  line_number INTEGER NULL,
+  product_id UUID NULL REFERENCES analytics.dim_product(id),
+  local_product_id UUID NULL REFERENCES public.product(id),
+  product_external_id VARCHAR(160) NULL,
+  product_sku VARCHAR(120) NULL,
+  product_name VARCHAR(240) NOT NULL,
+  unit_name VARCHAR(80) NULL,
+  quantity NUMERIC(18, 4) NOT NULL,
+  unit_price NUMERIC(18, 4) NULL,
+  gross_amount NUMERIC(18, 4) NULL,
+  discount_amount NUMERIC(18, 4) NULL,
+  tax_amount NUMERIC(18, 4) NULL,
+  net_amount NUMERIC(18, 4) NULL,
+  unit_cost NUMERIC(18, 4) NULL,
+  cost_amount NUMERIC(18, 4) NULL,
+  gross_profit NUMERIC(18, 4) NULL,
+  margin_percent NUMERIC(12, 6) NULL,
+  cost_status VARCHAR(30) NOT NULL DEFAULT 'MISSING',
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (sale_id, line_key),
+  CONSTRAINT analytics_fact_sale_item_quantity_check
+    CHECK (quantity <> 0),
+  CONSTRAINT analytics_fact_sale_item_cost_status_check
+    CHECK (cost_status IN ('SOURCE', 'PRODUCT', 'PRODUCTION', 'MISSING'))
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_sale_item_product_idx
+  ON analytics.fact_sale_item (product_id, sale_id);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_payment (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  external_id VARCHAR(160) NOT NULL,
+  document_number VARCHAR(120) NULL,
+  payment_on DATE NOT NULL REFERENCES analytics.dim_date(date_key),
+  payment_time TIME NULL,
+  direction VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN',
+  status VARCHAR(80) NULL,
+  payment_method VARCHAR(120) NULL,
+  bank_name VARCHAR(160) NULL,
+  counterparty_name VARCHAR(200) NULL,
+  counterparty_external_id VARCHAR(160) NULL,
+  related_document_type VARCHAR(80) NULL,
+  related_document_id VARCHAR(160) NULL,
+  related_document_number VARCHAR(120) NULL,
+  amount NUMERIC(18, 4) NOT NULL,
+  is_voided BOOLEAN NOT NULL DEFAULT FALSE,
+  source_updated_at TIMESTAMPTZ NULL,
+  first_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  UNIQUE (source_system, branch_id, external_id),
+  CONSTRAINT analytics_fact_payment_direction_check
+    CHECK (direction IN ('IN', 'OUT', 'UNKNOWN')),
+  CONSTRAINT analytics_fact_payment_amount_check
+    CHECK (amount >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_payment_date_idx
+  ON analytics.fact_payment (payment_on DESC, direction);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_purchase (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  external_id VARCHAR(160) NOT NULL,
+  document_number VARCHAR(120) NULL,
+  supplier_id UUID NULL REFERENCES analytics.dim_supplier(id),
+  purchase_on DATE NOT NULL REFERENCES analytics.dim_date(date_key),
+  status VARCHAR(80) NULL,
+  gross_amount NUMERIC(18, 4) NULL,
+  discount_amount NUMERIC(18, 4) NULL,
+  tax_amount NUMERIC(18, 4) NULL,
+  net_amount NUMERIC(18, 4) NULL,
+  paid_amount NUMERIC(18, 4) NULL,
+  balance_due NUMERIC(18, 4) NULL,
+  is_voided BOOLEAN NOT NULL DEFAULT FALSE,
+  source_updated_at TIMESTAMPTZ NULL,
+  first_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  UNIQUE (source_system, branch_id, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_purchase_date_idx
+  ON analytics.fact_purchase (purchase_on DESC, document_number);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_purchase_item (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_id UUID NOT NULL REFERENCES analytics.fact_purchase(id) ON DELETE CASCADE,
+  line_key VARCHAR(200) NOT NULL,
+  external_line_id VARCHAR(160) NULL,
+  line_number INTEGER NULL,
+  product_id UUID NULL REFERENCES analytics.dim_product(id),
+  local_product_id UUID NULL REFERENCES public.product(id),
+  product_external_id VARCHAR(160) NULL,
+  product_sku VARCHAR(120) NULL,
+  product_name VARCHAR(240) NOT NULL,
+  unit_name VARCHAR(80) NULL,
+  quantity NUMERIC(18, 4) NOT NULL,
+  unit_cost NUMERIC(18, 4) NULL,
+  gross_amount NUMERIC(18, 4) NULL,
+  discount_amount NUMERIC(18, 4) NULL,
+  tax_amount NUMERIC(18, 4) NULL,
+  net_amount NUMERIC(18, 4) NULL,
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (purchase_id, line_key),
+  CONSTRAINT analytics_fact_purchase_item_quantity_check
+    CHECK (quantity <> 0)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_purchase_item_product_idx
+  ON analytics.fact_purchase_item (product_id, purchase_id);
+
+CREATE TABLE IF NOT EXISTS analytics.fact_inventory_snapshot (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_system VARCHAR(40) NOT NULL,
+  branch_id VARCHAR(80) NOT NULL,
+  snapshot_on DATE NOT NULL REFERENCES analytics.dim_date(date_key),
+  product_id UUID NOT NULL REFERENCES analytics.dim_product(id),
+  local_product_id UUID NULL REFERENCES public.product(id),
+  quantity NUMERIC(18, 4) NOT NULL,
+  unit_cost NUMERIC(18, 4) NULL,
+  inventory_value NUMERIC(18, 4) NULL,
+  source_synced_at TIMESTAMPTZ NULL,
+  last_sync_run_id UUID NULL REFERENCES integration.sync_run(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source_system, branch_id, snapshot_on, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS analytics_fact_inventory_snapshot_date_idx
+  ON analytics.fact_inventory_snapshot (snapshot_on DESC, product_id);
+
+CREATE OR REPLACE VIEW analytics.operating_expenses AS
+SELECT
+  'APP_EXPENSE'::varchar(40) AS source_system,
+  expense.id::text AS external_id,
+  expense.expense_on,
+  expense.category,
+  expense.concept,
+  expense.provider_name,
+  expense.total_amount,
+  expense.is_voided,
+  expense.created_at,
+  expense.updated_at
+FROM public.operating_expense AS expense
+UNION ALL
+SELECT
+  'APP_TRANSPORT'::varchar(40) AS source_system,
+  transport.id::text AS external_id,
+  transport.cost_on AS expense_on,
+  'TRANSPORT'::varchar(30) AS category,
+  transport.concept,
+  transport.provider_name,
+  transport.total_cost AS total_amount,
+  transport.is_voided,
+  transport.created_at,
+  transport.updated_at
+FROM public.transport_cost AS transport;
+
+CREATE OR REPLACE VIEW analytics.daily_sales AS
+SELECT
+  sale.sale_on,
+  COUNT(*) FILTER (WHERE sale.is_voided = FALSE) AS transaction_count,
+  COALESCE(SUM(sale.gross_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS gross_amount,
+  COALESCE(SUM(sale.return_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS return_amount,
+  COALESCE(SUM(sale.tax_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS tax_amount,
+  COALESCE(SUM(sale.net_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS net_amount,
+  COALESCE(SUM(sale.cost_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS cost_amount,
+  COALESCE(SUM(sale.gross_profit) FILTER (WHERE sale.is_voided = FALSE), 0) AS gross_profit,
+  CASE
+    WHEN COALESCE(SUM(sale.net_amount) FILTER (WHERE sale.is_voided = FALSE), 0) = 0
+      THEN NULL
+    ELSE
+      COALESCE(SUM(sale.gross_profit) FILTER (WHERE sale.is_voided = FALSE), 0)
+      / SUM(sale.net_amount) FILTER (WHERE sale.is_voided = FALSE)
+  END AS margin_percent
+FROM analytics.fact_sale AS sale
+GROUP BY sale.sale_on;
+
+CREATE OR REPLACE VIEW analytics.product_performance AS
+SELECT
+  product.id AS product_id,
+  product.external_id,
+  product.sku,
+  product.name,
+  product.category,
+  product.product_line_name,
+  COUNT(DISTINCT sale.id) FILTER (WHERE sale.is_voided = FALSE) AS transaction_count,
+  COALESCE(SUM(item.quantity) FILTER (WHERE sale.is_voided = FALSE), 0) AS quantity_sold,
+  COALESCE(SUM(item.net_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS net_amount,
+  COALESCE(SUM(item.cost_amount) FILTER (WHERE sale.is_voided = FALSE), 0) AS cost_amount,
+  COALESCE(SUM(item.gross_profit) FILTER (WHERE sale.is_voided = FALSE), 0) AS gross_profit,
+  CASE
+    WHEN COALESCE(SUM(item.net_amount) FILTER (WHERE sale.is_voided = FALSE), 0) = 0
+      THEN NULL
+    ELSE
+      COALESCE(SUM(item.gross_profit) FILTER (WHERE sale.is_voided = FALSE), 0)
+      / SUM(item.net_amount) FILTER (WHERE sale.is_voided = FALSE)
+  END AS margin_percent,
+  COUNT(*) FILTER (
+    WHERE sale.is_voided = FALSE
+      AND item.cost_status = 'MISSING'
+  ) AS lines_without_cost
+FROM analytics.dim_product AS product
+LEFT JOIN analytics.fact_sale_item AS item
+  ON item.product_id = product.id
+LEFT JOIN analytics.fact_sale AS sale
+  ON sale.id = item.sale_id
+GROUP BY
+  product.id,
+  product.external_id,
+  product.sku,
+  product.name,
+  product.category,
+  product.product_line_name;
+
+CREATE OR REPLACE VIEW analytics.monthly_sales AS
+SELECT
+  DATE_TRUNC('month', sale_on)::date AS month_on,
+  SUM(transaction_count) AS transaction_count,
+  SUM(gross_amount) AS gross_amount,
+  SUM(return_amount) AS return_amount,
+  SUM(tax_amount) AS tax_amount,
+  SUM(net_amount) AS net_amount,
+  SUM(cost_amount) AS cost_amount,
+  SUM(gross_profit) AS gross_profit,
+  CASE
+    WHEN SUM(net_amount) = 0 THEN NULL
+    ELSE SUM(gross_profit) / SUM(net_amount)
+  END AS margin_percent
+FROM analytics.daily_sales
+GROUP BY DATE_TRUNC('month', sale_on)::date;

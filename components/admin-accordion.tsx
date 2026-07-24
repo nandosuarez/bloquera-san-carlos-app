@@ -95,6 +95,8 @@ type TransportProviderView = {
 };
 
 type CuentiConfigView = {
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
   baseUrl: string;
   branchId: string | null;
   companyId: string;
@@ -106,6 +108,50 @@ type CuentiConfigView = {
   missingForDocuments: string[];
   sellerId: string | null;
   warehouseId: string | null;
+};
+
+type CuentiAnalyticsStatusView = {
+  activeDateFrom: string | null;
+  activeDateTo: string | null;
+  backfillComplete: boolean;
+  invoiceCount: number;
+  itemCount: number;
+  lastRun: {
+    dateFrom: string;
+    dateTo: string;
+    errorMessage: string | null;
+    finishedAt: string | null;
+    recordsCreated: number;
+    recordsUpdated: number;
+    sourceRows: number;
+    startedAt: string;
+    status: string;
+    windowComplete: boolean;
+  } | null;
+  linesWithoutCost: number;
+  nextPage: number;
+};
+
+type CuentiFinancialStatusView = {
+  inventory: {
+    latestSnapshotOn: string | null;
+    productCount: number;
+  };
+  payments: {
+    backfillComplete: boolean;
+    count: number;
+    lastRunAt: string | null;
+    lastRunError: string | null;
+    lastRunStatus: string | null;
+    nextPage: number;
+  };
+  purchases: {
+    count: number;
+    itemCount: number;
+    lastRunAt: string | null;
+    lastRunError: string | null;
+    lastRunStatus: string | null;
+  };
 };
 
 type CuentiReferenceItemView = {
@@ -131,7 +177,9 @@ type AdministrationAccordionProps = {
   blockProducts: ProductOption[];
   collaborators: CollaboratorView[];
   customers: CustomerView[];
+  cuentiAnalyticsStatus: CuentiAnalyticsStatusView | null;
   cuentiConfig: CuentiConfigView;
+  cuentiFinancialStatus: CuentiFinancialStatusView | null;
   cuentiReferenceData: CuentiReferenceDataView | null;
   formulas: FormulaView[];
   products: ProductView[];
@@ -159,7 +207,9 @@ export function AdministrationAccordion({
   blockProducts,
   collaborators,
   customers,
+  cuentiAnalyticsStatus,
   cuentiConfig,
+  cuentiFinancialStatus,
   cuentiReferenceData,
   formulas,
   products,
@@ -199,17 +249,26 @@ export function AdministrationAccordion({
         <TransportProviderSection providers={transportProviders} />
       ) : null}
       {section === "cuenti" ? (
-        <CuentiSection config={cuentiConfig} referenceData={cuentiReferenceData} />
+        <CuentiSection
+          analyticsStatus={cuentiAnalyticsStatus}
+          config={cuentiConfig}
+          financialStatus={cuentiFinancialStatus}
+          referenceData={cuentiReferenceData}
+        />
       ) : null}
     </section>
   );
 }
 
 function CuentiSection({
+  analyticsStatus,
   config,
+  financialStatus,
   referenceData
 }: {
+  analyticsStatus: CuentiAnalyticsStatusView | null;
   config: CuentiConfigView;
+  financialStatus: CuentiFinancialStatusView | null;
   referenceData: CuentiReferenceDataView | null;
 }) {
   return (
@@ -225,6 +284,35 @@ function CuentiSection({
         <form action="/api/admin/cuenti/test" className="stack-form" method="post">
           <button className="primary-button" type="submit">
             Probar conexion
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card analytics-sync-master-card">
+        <div>
+          <strong>Sincronizacion gerencial</strong>
+          <p>
+            Actualiza ventas, pagos e inventario en una sola ejecucion. Las
+            cargas historicas avanzan de forma incremental sin duplicar datos.
+          </p>
+          <p className="table-muted">
+            Automatizacion:{" "}
+            {config.autoSyncEnabled
+              ? `activa cada ${config.autoSyncIntervalMinutes} minutos`
+              : "desactivada"}.
+          </p>
+        </div>
+        <form
+          action="/api/admin/cuenti/analytics/sync-all"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            Sincronizar todo
           </button>
         </form>
       </section>
@@ -307,6 +395,151 @@ function CuentiSection({
         </form>
       </section>
 
+      <section className="import-card">
+        <div>
+          <strong>Bodega analitica de ventas</strong>
+          <p>
+            Guarda facturas y productos vendidos con trazabilidad. La carga
+            historica avanza por meses y paginas; luego se actualiza de forma
+            incremental.
+          </p>
+          {analyticsStatus ? (
+            <p className="table-muted">
+              Facturas: {analyticsStatus.invoiceCount}. Lineas:{" "}
+              {analyticsStatus.itemCount}. Sin costo:{" "}
+              {analyticsStatus.linesWithoutCost}.
+              {analyticsStatus.activeDateFrom && analyticsStatus.activeDateTo
+                ? ` En proceso: ${analyticsStatus.activeDateFrom} a ${analyticsStatus.activeDateTo}, pagina ${analyticsStatus.nextPage}.`
+                : ""}
+            </p>
+          ) : null}
+          {analyticsStatus?.lastRun ? (
+            <p className="table-muted">
+              Ultimo intento: {formatDateTime(analyticsStatus.lastRun.startedAt)}.
+              Estado: {formatSyncStatus(analyticsStatus.lastRun.status)}. Periodo:{" "}
+              {analyticsStatus.lastRun.dateFrom} a {analyticsStatus.lastRun.dateTo}.
+            </p>
+          ) : null}
+          {analyticsStatus?.lastRun?.errorMessage ? (
+            <p className="message message-error">
+              {analyticsStatus.lastRun.errorMessage}
+            </p>
+          ) : null}
+        </div>
+        <form
+          action="/api/admin/cuenti/analytics/sales/sync"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            {analyticsStatus?.backfillComplete
+              ? "Actualizar ventas"
+              : "Continuar carga de ventas"}
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card">
+        <div>
+          <strong>Pagos y flujo de caja</strong>
+          <p>
+            Guarda los recaudos y pagos de Cuenti con fecha, tercero, medio de
+            pago y documento relacionado.
+          </p>
+          <p className="table-muted">
+            Pagos guardados: {financialStatus?.payments.count ?? 0}.
+            {financialStatus?.payments.lastRunAt
+              ? ` Ultimo intento: ${formatDateTime(
+                  financialStatus.payments.lastRunAt
+                )}, ${formatSyncStatus(
+                  financialStatus.payments.lastRunStatus ?? "UNKNOWN"
+                )}.`
+              : ""}
+          </p>
+          {financialStatus?.payments.lastRunError ? (
+            <p className="message message-error">
+              {financialStatus.payments.lastRunError}
+            </p>
+          ) : null}
+        </div>
+        <form
+          action="/api/admin/cuenti/analytics/payments/sync"
+          className="stack-form"
+          method="post"
+        >
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            {financialStatus?.payments.backfillComplete
+              ? "Actualizar pagos"
+              : "Continuar carga de pagos"}
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card">
+        <div>
+          <strong>Compras de Cuenti</strong>
+          <p>
+            Cuenti permite consultar una compra por ID, pero no ofrece un
+            listado. Escribe uno o varios IDs separados por coma para
+            incorporarlos con proveedor y productos.
+          </p>
+          <p className="table-muted">
+            Compras guardadas: {financialStatus?.purchases.count ?? 0}. Lineas:{" "}
+            {financialStatus?.purchases.itemCount ?? 0}.
+          </p>
+          {financialStatus?.purchases.lastRunError ? (
+            <p className="message message-error">
+              {financialStatus.purchases.lastRunError}
+            </p>
+          ) : null}
+        </div>
+        <form
+          action="/api/admin/cuenti/analytics/purchases/sync"
+          className="stack-form"
+          method="post"
+        >
+          <label className="field">
+            <span>ID de compra</span>
+            <input
+              name="refs"
+              placeholder="1003, 1004"
+              required
+              type="text"
+            />
+          </label>
+          <button
+            className="primary-button"
+            disabled={!config.isReadyForQueries || !config.branchId}
+            type="submit"
+          >
+            Cargar compras
+          </button>
+        </form>
+      </section>
+
+      <section className="import-card">
+        <div>
+          <strong>Inventario historico</strong>
+          <p>
+            Cada actualizacion de stock conserva una fotografia diaria para
+            analizar valor, rotacion y productos sin existencia.
+          </p>
+          <p className="table-muted">
+            Ultima fotografia:{" "}
+            {financialStatus?.inventory.latestSnapshotOn ?? "pendiente"}.
+            Productos: {financialStatus?.inventory.productCount ?? 0}.
+          </p>
+        </div>
+      </section>
+
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -348,6 +581,15 @@ function CuentiSection({
               label="Consecutivo"
               status={config.consecutiveId ? "Configurado" : "Pendiente"}
               value={config.consecutiveId ?? "CUENTI_CONSECUTIVE_ID"}
+            />
+            <CuentiConfigRow
+              label="Sincronizacion automatica"
+              status={config.autoSyncEnabled ? "Configurado" : "Pendiente"}
+              value={
+                config.autoSyncEnabled
+                  ? `Cada ${config.autoSyncIntervalMinutes} minutos`
+                  : "CUENTI_AUTO_SYNC_ENABLED"
+              }
             />
           </tbody>
         </table>
@@ -495,6 +737,13 @@ function formatDateTime(value: string) {
     timeStyle: "short",
     timeZone: "America/Bogota"
   }).format(new Date(value));
+}
+
+function formatSyncStatus(value: string) {
+  if (value === "SUCCESS") return "Completado";
+  if (value === "FAILED") return "Con error";
+  if (value === "RUNNING") return "En proceso";
+  return value;
 }
 
 function CustomerSection({ customers }: { customers: CustomerView[] }) {
