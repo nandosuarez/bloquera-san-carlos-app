@@ -779,6 +779,38 @@ export async function getCuentiPaymentSyncPage(input: {
   };
 }
 
+export async function getCuentiPaymentDiagnostics(input: {
+  dateFrom: string;
+  dateTo: string;
+}) {
+  const status = getCuentiConfigStatus();
+
+  if (!status.branchId) {
+    throw new CuentiIntegrationError(
+      "missing_cuenti_branch",
+      "Falta configurar CUENTI_BRANCH_ID."
+    );
+  }
+
+  const credentials = getCuentiCredentials();
+  const branchId = await resolveCuentiBranchId(credentials, status);
+  const payload = await requestCuentiData(credentials, "payments", {
+    branchId,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    page: "1",
+    pageSize: "3"
+  });
+  const rawItems = extractResponseItems(payload);
+
+  return {
+    branchId,
+    container: describeDiagnosticContainer(payload),
+    rawItemsSeen: rawItems.length,
+    samples: rawItems.map((item) => collectDiagnosticFields(item))
+  };
+}
+
 export async function getCuentiPaymentSyncDetail(
   ref: string,
   branchId?: string | null
@@ -1212,6 +1244,109 @@ function extractCatalogItems(payload: CuentiRawResponse, endpoint: string) {
 
 function extractResponseItems(payload: CuentiRawResponse) {
   return extractItemsFromUnknown(payload) ?? [];
+}
+
+function describeDiagnosticContainer(value: unknown, depth = 0): unknown {
+  if (depth > 4) {
+    return typeof value;
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      length: value.length,
+      sample: value.length > 0
+        ? describeDiagnosticContainer(value[0], depth + 1)
+        : null,
+      type: "array"
+    };
+  }
+
+  if (!isRecord(value)) {
+    return typeof value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [
+      key,
+      describeDiagnosticContainer(nestedValue, depth + 1)
+    ])
+  );
+}
+
+function collectDiagnosticFields(value: unknown) {
+  const fields: Array<{
+    path: string;
+    type: string;
+    value: string | number | boolean | null;
+  }> = [];
+  const fieldPattern =
+    /(id|date|fecha|value|valor|amount|total|type|tipo|state|estado|payment|pago|direction|nature|naturaleza|concept|descripcion|detail|detalle|document|numero|method|medio)/;
+
+  collectDiagnosticFieldsFromValue(value, "$", fields, fieldPattern, 0);
+
+  return fields.slice(0, 120);
+}
+
+function collectDiagnosticFieldsFromValue(
+  value: unknown,
+  path: string,
+  fields: Array<{
+    path: string;
+    type: string;
+    value: string | number | boolean | null;
+  }>,
+  fieldPattern: RegExp,
+  depth: number
+) {
+  if (fields.length >= 120 || depth > 7 || value === null) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.slice(0, 2).forEach((item, index) => {
+      collectDiagnosticFieldsFromValue(
+        item,
+        `${path}[${index}]`,
+        fields,
+        fieldPattern,
+        depth + 1
+      );
+    });
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (fields.length >= 120) {
+      return;
+    }
+
+    const normalizedKey = normalizeFieldKey(key);
+    const fieldPath = `${path}.${key}`;
+
+    if (fieldPattern.test(normalizedKey)) {
+      fields.push({
+        path: fieldPath,
+        type: Array.isArray(nestedValue) ? "array" : typeof nestedValue,
+        value:
+          nestedValue === null ||
+          ["boolean", "number", "string"].includes(typeof nestedValue)
+            ? (nestedValue as string | number | boolean | null)
+            : null
+      });
+    }
+
+    collectDiagnosticFieldsFromValue(
+      nestedValue,
+      fieldPath,
+      fields,
+      fieldPattern,
+      depth + 1
+    );
+  }
 }
 
 function extractCuentiPagination(payload: CuentiRawResponse) {
