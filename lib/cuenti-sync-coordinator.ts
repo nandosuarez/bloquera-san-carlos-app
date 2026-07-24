@@ -20,16 +20,26 @@ export class CuentiWarehouseSyncError extends Error {
 export async function syncCuentiWarehouse(input?: {
   includeInventory?: boolean;
   initiatedByUserId?: string | null;
+  maxCyclesPerStage?: number;
 }) {
+  const maxCycles = clampCycles(input?.maxCyclesPerStage);
   const sales = await runWarehouseStage("sales", () =>
-    syncCuentiSalesWarehouse({
-      initiatedByUserId: input?.initiatedByUserId ?? null
-    })
+    runIncrementalCycles(
+      () =>
+        syncCuentiSalesWarehouse({
+          initiatedByUserId: input?.initiatedByUserId ?? null
+        }),
+      maxCycles
+    )
   );
   const payments = await runWarehouseStage("payments", () =>
-    syncCuentiPaymentsWarehouse({
-      initiatedByUserId: input?.initiatedByUserId ?? null
-    })
+    runIncrementalCycles(
+      () =>
+        syncCuentiPaymentsWarehouse({
+          initiatedByUserId: input?.initiatedByUserId ?? null
+        }),
+      maxCycles
+    )
   );
   const needsInventory =
     input?.includeInventory === true || (await shouldCaptureInventoryToday());
@@ -38,6 +48,54 @@ export async function syncCuentiWarehouse(input?: {
     : null;
 
   return { inventory, payments, sales };
+}
+
+type IncrementalSyncResult = {
+  backfillComplete: boolean;
+  details: number;
+  pages: number;
+  recordsCreated: number;
+  recordsSkipped: number;
+  recordsUpdated: number;
+  sourceRows: number;
+};
+
+async function runIncrementalCycles<T extends IncrementalSyncResult>(
+  operation: () => Promise<T>,
+  maxCycles: number
+): Promise<T> {
+  let latest: T | null = null;
+  const totals = {
+    details: 0,
+    pages: 0,
+    recordsCreated: 0,
+    recordsSkipped: 0,
+    recordsUpdated: 0,
+    sourceRows: 0
+  };
+
+  for (let cycle = 0; cycle < maxCycles; cycle += 1) {
+    latest = await operation();
+    totals.details += latest.details;
+    totals.pages += latest.pages;
+    totals.recordsCreated += latest.recordsCreated;
+    totals.recordsSkipped += latest.recordsSkipped;
+    totals.recordsUpdated += latest.recordsUpdated;
+    totals.sourceRows += latest.sourceRows;
+
+    if (latest.backfillComplete) {
+      break;
+    }
+  }
+
+  if (!latest) {
+    throw new Error("Cuenti incremental synchronization did not run.");
+  }
+
+  return {
+    ...latest,
+    ...totals
+  };
 }
 
 async function runWarehouseStage<T>(
@@ -49,6 +107,11 @@ async function runWarehouseStage<T>(
   } catch (error) {
     throw new CuentiWarehouseSyncError(stage, error);
   }
+}
+
+function clampCycles(value?: number) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(12, Math.max(1, Math.trunc(value ?? 1)));
 }
 
 async function shouldCaptureInventoryToday() {

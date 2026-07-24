@@ -16,7 +16,8 @@ export async function POST(request: NextRequest) {
   try {
     const result = await syncCuentiWarehouse({
       includeInventory: true,
-      initiatedByUserId: session.userId
+      initiatedByUserId: session.userId,
+      maxCyclesPerStage: 8
     });
 
     return redirectTo(
